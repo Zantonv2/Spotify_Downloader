@@ -149,3 +149,7 @@ ffprobe/
 
 # Generated documentation
 docs/build/
+
+# Icon files in root directory (should be in src-tauri/icons/)
+/*.png
+/*.ico
