@@ -1,0 +1,178 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    overflow-x: hidden;
+  }
+  
+  html {
+    overflow-x: hidden;
+  }
+}
+
+@layer components {
+  .glass {
+    @apply bg-glass-100/20 backdrop-blur-md border border-glass-200/30;
+  }
+  
+  .glass-strong {
+    @apply bg-glass-200/30 backdrop-blur-lg border border-glass-300/40;
+  }
+  
+  .glass-card {
+    @apply glass rounded-xl p-6 shadow-2xl;
+  }
+  
+  .glass-button {
+    @apply glass-strong rounded-lg px-6 py-3 font-medium transition-all duration-200 hover:bg-glass-300/40 hover:scale-105 active:scale-95;
+  }
+  
+  .glass-input {
+    @apply glass rounded-lg px-4 py-3 w-full placeholder:text-glass-600 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500/50 text-white;
+  }
+  
+  .glass-input option {
+    @apply text-slate-900 bg-white;
+  }
+  
+  .gradient-text {
+    @apply bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent;
+  }
+  
+  .gradient-button {
+    @apply bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-medium rounded-lg px-6 py-3 transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg;
+  }
+  
+  .status-pending {
+    @apply text-yellow-400 bg-yellow-400/20;
+  }
+  
+  .status-downloading {
+    @apply text-blue-400 bg-blue-400/20;
+  }
+  
+  .status-completed {
+    @apply text-green-400 bg-green-400/20;
+  }
+  
+  .status-failed {
+    @apply text-red-400 bg-red-400/20;
+  }
+  
+  .status-paused {
+    @apply text-orange-400 bg-orange-400/20;
+  }
+}
+
+/* Hide all scrollbars globally */
+* {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+*::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Ultra smooth scrolling for track list */
+.smooth-scroll {
+  scroll-behavior: smooth;
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+  scroll-padding: 20px;
+  scroll-snap-type: y proximity;
+  transition: scroll-behavior 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.smooth-scroll::-webkit-scrollbar {
+  display: none !important;
+}
+
+/* Enhanced smooth scrolling with momentum */
+.smooth-scroll {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+  scroll-snap-type: y proximity;
+  scroll-padding: 20px;
+}
+
+/* Smooth scroll for all elements */
+* {
+  scroll-behavior: smooth;
+}
+
+/* Hide scrollbars only for specific elements that need it */
+
+/* Completely invisible scrollbar */
+.invisible-scrollbar {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+.invisible-scrollbar::-webkit-scrollbar {
+  width: 0px !important;
+  height: 0px !important;
+  background: transparent !important;
+}
+
+.invisible-scrollbar::-webkit-scrollbar-track {
+  background: transparent !important;
+}
+
+.invisible-scrollbar::-webkit-scrollbar-thumb {
+  background: transparent !important;
+}
+
+.invisible-scrollbar::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+.animate-pulse-slow {
+  animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}

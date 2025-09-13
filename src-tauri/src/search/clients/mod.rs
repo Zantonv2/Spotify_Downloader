@@ -1,0 +1,2 @@
+// Search client implementations would go here
+// For now, this is a placeholder module

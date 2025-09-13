@@ -1,0 +1,47 @@
+[package]
+name = "spotify-downloader"
+version = "1.0.0"
+description = "A modern, cross-platform desktop application for downloading music from various sources with high-quality metadata and lyrics embedding"
+authors = ["ZantonV2 <172037461+Zantonv2@users.noreply.github.com>"]
+license = "MIT"
+repository = "https://github.com/ZantonV2/Spotify_Downloader"
+homepage = "https://github.com/ZantonV2/Spotify_Downloader"
+documentation = "https://github.com/ZantonV2/Spotify_Downloader#readme"
+keywords = ["music", "downloader", "spotify", "youtube", "metadata", "lyrics", "tauri", "desktop"]
+categories = ["multimedia", "command-line-utilities", "web-programming::http-client"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.0", features = [] }
+tauri-plugin-dialog = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+async-trait = "0.1"
+thiserror = "1.0"
+log = "0.4"
+env_logger = "0.10"
+reqwest = { version = "0.11", features = ["json"] }
+url = "2.4"
+uuid = { version = "1.0", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+config = "0.14"
+anyhow = "1.0"
+base64 = "0.21"
+regex = "1.10"
+csv = "1.3"
+hex = "0.4"
+aes-gcm = "0.10"
+rand = "0.8"
+rpassword = "7.3"
+clap = { version = "4.0", features = ["derive"] }
+urlencoding = "2.1"
+futures = "0.3"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
