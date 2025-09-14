@@ -12,6 +12,7 @@
     "active": true,
     "targets": "all",
     "icon": [
+      "icons/icon.ico",
       "icons/favicon-16x16.png",
       "icons/favicon-32x32.png",
       "icons/android-chrome-192x192.png",

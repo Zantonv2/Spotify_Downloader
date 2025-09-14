@@ -19,7 +19,7 @@ function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [activeTab, setActiveTab] = useState<'search' | 'queue' | 'import'>('search')
   const searchInputRef = useRef<HTMLInputElement>(null)
-  const { toasts, removeToast, success, error, warning } = useToast()
+  const { toasts, removeToast, success } = useToast()
 
   const loadDownloadQueue = async () => {
     try {
@@ -77,23 +77,6 @@ function App() {
     }
   }
 
-  const handlePauseDownload = async (taskId: string) => {
-    try {
-      await invoke('pause_download', { taskId })
-      loadDownloadQueue()
-    } catch (error) {
-      console.error('Failed to pause download:', error)
-    }
-  }
-
-  const handleResumeDownload = async (taskId: string) => {
-    try {
-      await invoke('resume_download', { taskId })
-      loadDownloadQueue()
-    } catch (error) {
-      console.error('Failed to resume download:', error)
-    }
-  }
 
   const handleRemoveDownload = async (taskId: string) => {
     try {
@@ -111,16 +94,7 @@ function App() {
       loadDownloadQueue()
     } catch (error) {
       console.error('Failed to download all:', error)
-      error('Download Failed', 'Failed to start downloading all tracks')
-    }
-  }
-
-  const handleDownloadSelected = async (taskIds: string[]) => {
-    try {
-      await invoke('download_selected', { taskIds })
-      loadDownloadQueue()
-    } catch (error) {
-      console.error('Failed to download selected:', error)
+      console.error('Download Failed: Failed to start downloading all tracks')
     }
   }
 
@@ -142,15 +116,6 @@ function App() {
     }
   }
 
-  const handleStopAll = async () => {
-    try {
-      await invoke('stop_all_downloads')
-      loadDownloadQueue()
-    } catch (error) {
-      console.error('Failed to stop all:', error)
-    }
-  }
-
   const handleClearList = async () => {
     try {
       await invoke('clear_download_queue')
@@ -160,14 +125,6 @@ function App() {
     }
   }
 
-  const handleRetryDownload = async (taskId: string) => {
-    try {
-      await invoke('retry_download', { taskId })
-      loadDownloadQueue()
-    } catch (error) {
-      console.error('Failed to retry download:', error)
-    }
-  }
 
 
   // Load download queue on app start
@@ -243,40 +200,10 @@ function App() {
         ) : (
           <DownloadQueue
             queue={downloadQueue}
-            onPause={handlePauseDownload}
-            onResume={handleResumeDownload}
             onRemove={handleRemoveDownload}
             onRefresh={loadDownloadQueue}
             onDownloadAll={handleDownloadAll}
-            onDownloadSelected={handleDownloadSelected}
-            onPauseAll={handlePauseAll}
-            onResumeAll={handleResumeAll}
-            onStopAll={handleStopAll}
             onClearList={handleClearList}
-            onRetry={handleRetryDownload}
-            onDownload={(taskId: string) => {
-              // Find the track by ID and download it
-              const task = downloadQueue.find(t => t.id === taskId)
-              if (task) {
-                handleDownload({
-                  id: task.track_info.id,
-                  title: task.track_info.title,
-                  artist: task.track_info.artist,
-                  album: task.track_info.album,
-                  url: task.track_info.url,
-                  source: task.track_info.source,
-                  duration: task.track_info.duration,
-                  thumbnail_url: task.track_info.thumbnail_url,
-                  year: task.track_info.year,
-                  genre: task.track_info.genre,
-                  isrc: task.track_info.isrc,
-                  album_artist: task.track_info.album_artist,
-                  track_number: task.track_info.track_number,
-                  disc_number: task.track_info.disc_number,
-                  composer: task.track_info.composer
-                })
-              }
-            }}
           />
         )}
       </main>

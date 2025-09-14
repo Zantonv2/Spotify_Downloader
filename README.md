@@ -17,6 +17,13 @@ I wanted a simple way to download music with proper metadata and lyrics. Most do
 
 ## Getting Started
 
+### Quick Setup (Recommended)
+
+**Windows:** Double-click `setup_wizard.bat` and follow the wizard
+**macOS/Linux:** Run `python3 setup_wizard.py` and follow the wizard
+
+### Manual Setup
+
 You'll need:
 - Rust
 - Node.js 
@@ -30,6 +37,8 @@ cargo build
 npm install
 npm run tauri dev
 ```
+
+See [SETUP.md](SETUP.md) for detailed instructions and troubleshooting.
 
 Add your API keys in Settings (Spotify, Musixmatch, etc.) - the app will work without them but with limited functionality.
 
