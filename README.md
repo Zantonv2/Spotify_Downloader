@@ -15,13 +15,6 @@ A desktop app for downloading music with proper metadata and lyrics. Built with 
 
 I wanted a simple way to download music with proper metadata and lyrics. Most downloaders either have terrible UIs or don't handle metadata well. This one does both.
 
-## Getting Started
-
-### Quick Setup (Recommended)
-
-**Windows:** Double-click `setup_wizard.bat` and follow the wizard
-**macOS/Linux:** Run `python3 setup_wizard.py` and follow the wizard
-
 ### Manual Setup
 
 You'll need:
