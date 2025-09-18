@@ -159,7 +159,7 @@ pub async fn download_track(
     // Get the next available order number for individual tracks
     let next_order = download_manager.get_next_individual_order().await;
     
-    let task_id = match download_manager.add_download_with_order(track_info, output_path, true, next_order).await {
+    let task_id = match download_manager.add_download_with_order(track_info, output_path, false, next_order).await {
         Ok(id) => {
             println!("Successfully added download task with ID: {}", id);
             id
@@ -171,6 +171,30 @@ pub async fn download_track(
     };
     
     Ok(task_id)
+}
+
+#[tauri::command]
+pub async fn download_selected_tracks(
+    state: State<'_, AppState>,
+    task_ids: Vec<String>,
+) -> std::result::Result<Vec<String>, AppError> {
+    let download_manager = state.download_manager.lock().await;
+    let mut started_tasks = Vec::new();
+    
+    for task_id in task_ids {
+        match download_manager.start_download(task_id.clone()).await {
+            Ok(_) => {
+                println!("Successfully started download for task: {}", task_id);
+                started_tasks.push(task_id);
+            },
+            Err(e) => {
+                println!("Failed to start download for task {}: {}", task_id, e);
+                // Continue with other tasks even if one fails
+            }
+        }
+    }
+    
+    Ok(started_tasks)
 }
 
 #[tauri::command]
@@ -434,6 +458,23 @@ pub async fn download_single(
     Ok(serde_json::json!({
         "success": true,
         "task_id": task_id
+    }))
+}
+
+#[tauri::command]
+pub async fn process_download_queue(
+    state: State<'_, AppState>,
+) -> std::result::Result<serde_json::Value, AppError> {
+    let download_manager = state.download_manager.lock().await;
+    
+    if let Err(e) = download_manager.process_queue().await {
+        log::error!("Failed to process download queue: {}", e);
+        return Err(AppError::DownloadError(format!("Failed to process queue: {}", e)));
+    }
+    
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Queue processing initiated"
     }))
 }
 

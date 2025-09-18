@@ -285,7 +285,26 @@ class AudioProcessor:
             metadata = request["metadata"]
             
             logger.info(f"Embedding metadata into: {file_path}")
+            logger.info(f"File path exists: {file_path.exists()}")
+            logger.info(f"File path absolute: {file_path.absolute()}")
+            logger.info(f"File path as string: {str(file_path)}")
+            logger.info(f"File path bytes: {str(file_path).encode('utf-8')}")
             logger.info(f"Metadata: {metadata}")
+            
+            # Check if file exists before proceeding
+            if not file_path.exists():
+                logger.error(f"File does not exist: {file_path}")
+                # Try to find similar files in the directory
+                parent_dir = file_path.parent
+                if parent_dir.exists():
+                    logger.info(f"Listing files in directory: {parent_dir}")
+                    try:
+                        for file in parent_dir.iterdir():
+                            if file.is_file() and file.suffix.lower() in ['.mp3', '.m4a', '.flac', '.wav']:
+                                logger.info(f"Found audio file: {file}")
+                    except Exception as e:
+                        logger.error(f"Error listing directory: {e}")
+                return {"success": False, "error": f"File does not exist: {file_path}"}
             
             # Embed metadata using mutagen
             embed_result = self.embed_metadata({
@@ -434,29 +453,72 @@ class AudioProcessor:
                 audio.save()
                 
             elif file_ext in [".m4a", ".mp4"]:
+                from mutagen.mp4 import MP4
+                from mutagen.mp3 import MP3
                 
-                audio = MP4(str(file_path))
+                logger.info(f"Attempting to load M4A file for metadata: {file_path}")
+                try:
+                    audio = MP4(str(file_path))
+                    logger.info(f"Successfully loaded M4A file: {file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to load as M4A file {file_path}: {e}")
+                    logger.info(f"Trying to load as MP3 file instead...")
+                    try:
+                        # Try loading as MP3 if M4A fails
+                        audio = MP3(str(file_path))
+                        logger.info(f"Successfully loaded as MP3 file: {file_path}")
+                        # Use MP3 format for this file
+                        file_ext = ".mp3"
+                    except Exception as e2:
+                        logger.error(f"Failed to load as both M4A and MP3: {e2}")
+                        return {"error": f"Failed to load audio file: {e}"}
                 
-                if metadata.get("title"):
-                    audio["\xa9nam"] = [metadata["title"]]
-                if metadata.get("artist"):
-                    audio["\xa9ART"] = [metadata["artist"]]
-                if metadata.get("album"):
-                    audio["\xa9alb"] = [metadata["album"]]
-                if metadata.get("year"):
-                    audio["\xa9day"] = [str(metadata["year"])]
-                if metadata.get("genre"):
-                    audio["\xa9gen"] = [metadata["genre"]]
-                if metadata.get("track_number"):
-                    audio["trkn"] = [(metadata["track_number"], 0)]
-                if metadata.get("disc_number"):
-                    audio["disk"] = [(metadata["disc_number"], 0)]
-                if metadata.get("composer"):
-                    audio["\xa9wrt"] = [metadata["composer"]]
-                if metadata.get("isrc"):
-                    audio["----:com.apple.iTunes:ISRC"] = [metadata["isrc"].encode()]
-                
-                audio.save()
+                if file_ext == ".mp3":
+                    # Handle as MP3 file
+                    if metadata.get("title"):
+                        audio.tags.add(TIT2(encoding=3, text=metadata["title"]))
+                    if metadata.get("artist"):
+                        audio.tags.add(TPE1(encoding=3, text=metadata["artist"]))
+                    if metadata.get("album"):
+                        audio.tags.add(TALB(encoding=3, text=metadata["album"]))
+                    if metadata.get("year"):
+                        audio.tags.add(TYER(encoding=3, text=str(metadata["year"])))
+                    if metadata.get("genre"):
+                        audio.tags.add(TCON(encoding=3, text=metadata["genre"]))
+                    if metadata.get("track_number"):
+                        audio.tags.add(TRCK(encoding=3, text=str(metadata["track_number"])))
+                    if metadata.get("disc_number"):
+                        audio.tags.add(TPOS(encoding=3, text=str(metadata["disc_number"])))
+                    if metadata.get("album_artist"):
+                        audio.tags.add(TPE2(encoding=3, text=metadata["album_artist"]))
+                    if metadata.get("composer"):
+                        audio.tags.add(TCOM(encoding=3, text=metadata["composer"]))
+                    if metadata.get("isrc"):
+                        audio.tags.add(TSRC(encoding=3, text=metadata["isrc"]))
+                    
+                    audio.save()
+                else:
+                    # Handle as M4A file
+                    if metadata.get("title"):
+                        audio["\xa9nam"] = [metadata["title"]]
+                    if metadata.get("artist"):
+                        audio["\xa9ART"] = [metadata["artist"]]
+                    if metadata.get("album"):
+                        audio["\xa9alb"] = [metadata["album"]]
+                    if metadata.get("year"):
+                        audio["\xa9day"] = [str(metadata["year"])]
+                    if metadata.get("genre"):
+                        audio["\xa9gen"] = [metadata["genre"]]
+                    if metadata.get("track_number"):
+                        audio["trkn"] = [(metadata["track_number"], 0)]
+                    if metadata.get("disc_number"):
+                        audio["disk"] = [(metadata["disc_number"], 0)]
+                    if metadata.get("composer"):
+                        audio["\xa9wrt"] = [metadata["composer"]]
+                    if metadata.get("isrc"):
+                        audio["----:com.apple.iTunes:ISRC"] = [metadata["isrc"].encode()]
+                    
+                    audio.save()
                 
             elif file_ext == ".flac":
                 
@@ -1292,6 +1354,7 @@ class AudioProcessor:
                 audio.save()
                 
             elif file_ext in [".m4a", ".mp4"]:
+                from mutagen.mp4 import MP4
                 
                 audio = MP4(str(file_path))
                 audio["covr"] = [cover_art["data"]]
@@ -1381,7 +1444,13 @@ class AudioProcessor:
             file_path = Path(request["file_path"])
             lyrics = request["lyrics"]
             
+            logger.info(f"Embedding lyrics into: {file_path}")
+            logger.info(f"File path exists: {file_path.exists()}")
+            logger.info(f"File path absolute: {file_path.absolute()}")
+            logger.info(f"File path as string: {str(file_path)}")
+            
             if not file_path.exists():
+                logger.error(f"File does not exist: {file_path}")
                 return {"error": "File does not exist"}
             
             # Format lyrics with proper line breaks
@@ -1399,10 +1468,35 @@ class AudioProcessor:
                 audio.save()
                 
             elif file_ext in [".m4a", ".mp4"]:
+                from mutagen.mp4 import MP4
+                from mutagen.mp3 import MP3
+                from mutagen.id3 import ID3, USLT
                 
-                audio = MP4(str(file_path))
-                audio["\xa9lyr"] = formatted_lyrics
-                audio.save()
+                logger.info(f"Attempting to load M4A file for lyrics: {file_path}")
+                try:
+                    audio = MP4(str(file_path))
+                    logger.info(f"Successfully loaded M4A file for lyrics: {file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to load as M4A file for lyrics {file_path}: {e}")
+                    logger.info(f"Trying to load as MP3 file for lyrics instead...")
+                    try:
+                        # Try loading as MP3 if M4A fails
+                        audio = MP3(str(file_path), ID3=ID3)
+                        logger.info(f"Successfully loaded as MP3 file for lyrics: {file_path}")
+                        # Use MP3 format for this file
+                        file_ext = ".mp3"
+                    except Exception as e2:
+                        logger.error(f"Failed to load as both M4A and MP3 for lyrics: {e2}")
+                        return {"error": f"Failed to load audio file for lyrics: {e}"}
+                
+                if file_ext == ".mp3":
+                    # Handle as MP3 file
+                    audio.tags.add(USLT(encoding=3, lang="eng", desc="", text=formatted_lyrics))
+                    audio.save()
+                else:
+                    # Handle as M4A file
+                    audio["\xa9lyr"] = formatted_lyrics
+                    audio.save()
                 
             elif file_ext in [".flac", ".wav"]:
                 # For FLAC and WAV, create LRC file instead of embedding
@@ -1448,6 +1542,7 @@ class AudioProcessor:
                     }
                     
             elif file_ext in [".m4a", ".mp4"]:
+                from mutagen.mp4 import MP4
                 
                 audio = MP4(str(file_path))
                 metadata = {
@@ -1817,16 +1912,24 @@ class AudioProcessor:
 
 def main():
     """Main entry point for the subprocess"""
+    # Set UTF-8 encoding for stdin/stdout
+    sys.stdin.reconfigure(encoding='utf-8')
+    sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
+    
     processor = AudioProcessor()
     
     # Read input from stdin
     try:
         input_data = json.loads(sys.stdin.read())
+        logger.info(f"Received input: {input_data}")
+        logger.info(f"Input bytes: {str(input_data).encode('utf-8')}")
         result = processor.process_request(input_data)
-        print(json.dumps(result))
+        print(json.dumps(result, ensure_ascii=False))
     except Exception as e:
+        logger.error(f"Error in main: {e}")
         error_result = {"error": f"Failed to process request: {e}"}
-        print(json.dumps(error_result))
+        print(json.dumps(error_result, ensure_ascii=False))
         sys.exit(1)
 
 if __name__ == "__main__":

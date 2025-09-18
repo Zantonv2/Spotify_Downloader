@@ -98,6 +98,17 @@ function App() {
     }
   }
 
+  const handleDownloadSelected = async (taskIds: string[]) => {
+    try {
+      const startedTasks = await invoke<string[]>('download_selected_tracks', { taskIds })
+      success('Download Started', `Started downloading ${startedTasks.length} selected tracks`)
+      loadDownloadQueue()
+    } catch (error) {
+      console.error('Failed to download selected:', error)
+      console.error('Download Failed: Failed to start downloading selected tracks')
+    }
+  }
+
   const handlePauseAll = async () => {
     try {
       await invoke('pause_all_downloads')
@@ -203,6 +214,7 @@ function App() {
             onRemove={handleRemoveDownload}
             onRefresh={loadDownloadQueue}
             onDownloadAll={handleDownloadAll}
+            onDownloadSelected={handleDownloadSelected}
             onClearList={handleClearList}
           />
         )}

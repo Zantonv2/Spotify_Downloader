@@ -65,8 +65,12 @@ impl MetadataProvider {
     }
 
     pub async fn search_metadata(&self, artist: &str, title: &str) -> Result<Option<MetadataInfo>> {
+        self.search_metadata_with_album(artist, title, None).await
+    }
+
+    pub async fn search_metadata_with_album(&self, artist: &str, title: &str, album: Option<&str>) -> Result<Option<MetadataInfo>> {
         // Run all three sources in parallel for comprehensive metadata collection
-        let spotify_future = self.try_spotify(artist, title);
+        let spotify_future = self.try_spotify(artist, title, album);
         let musicbrainz_future = self.try_musicbrainz(artist, title);
         let itunes_future = self.try_itunes(artist, title);
         
@@ -107,20 +111,11 @@ impl MetadataProvider {
             combined_metadata.cover_art_url = spotify.cover_art_url;
         }
         
-        // Enhance with MusicBrainz data (best for detailed metadata)
+        // MusicBrainz should ONLY provide detailed metadata, never basic info
         if let Some(musicbrainz) = musicbrainz_metadata {
-            // Use MusicBrainz data to fill in missing or enhance existing data
-            if combined_metadata.title == "Unknown Title" || combined_metadata.title.is_empty() {
-                combined_metadata.title = musicbrainz.title;
-            }
-            if combined_metadata.artist == "Unknown Artist" || combined_metadata.artist.is_empty() {
-                combined_metadata.artist = musicbrainz.artist;
-            }
-            if combined_metadata.album.is_none() || combined_metadata.album.as_ref().unwrap().is_empty() {
-                combined_metadata.album = musicbrainz.album;
-            }
+            log::debug!("📊 [MUSICBRAINZ] Adding detailed metadata: {} - {}", musicbrainz.artist, musicbrainz.title);
             
-            // MusicBrainz excels at detailed metadata
+            // MusicBrainz excels at detailed metadata - ONLY use these fields
             combined_metadata.year = musicbrainz.year.or(combined_metadata.year);
             combined_metadata.genre = musicbrainz.genre.or(combined_metadata.genre);
             combined_metadata.disc_number = musicbrainz.disc_number.or(combined_metadata.disc_number);
@@ -134,16 +129,23 @@ impl MetadataProvider {
             }
         }
         
-        // Fill remaining gaps with iTunes data
+        // iTunes should only fill in missing basic info, never override existing data
         if let Some(itunes) = itunes_metadata {
-            // Fill in any remaining missing basic info
+            log::debug!("🍎 [ITUNES] Checking for missing metadata: {} - {}", itunes.artist, itunes.title);
+            
+            // Only fill in missing basic info, never override existing data
             if combined_metadata.title == "Unknown Title" || combined_metadata.title.is_empty() {
+                log::debug!("🍎 [ITUNES] Filled missing title: {}", itunes.title);
                 combined_metadata.title = itunes.title;
             }
             if combined_metadata.artist == "Unknown Artist" || combined_metadata.artist.is_empty() {
+                log::debug!("🍎 [ITUNES] Filled missing artist: {}", itunes.artist);
                 combined_metadata.artist = itunes.artist;
             }
             if combined_metadata.album.is_none() || combined_metadata.album.as_ref().unwrap().is_empty() {
+                if let Some(ref album) = &itunes.album {
+                    log::debug!("🍎 [ITUNES] Filled missing album: {}", album);
+                }
                 combined_metadata.album = itunes.album;
             }
             
@@ -183,32 +185,176 @@ impl MetadataProvider {
         Ok(None)
     }
 
-    async fn try_spotify(&self, artist: &str, title: &str) -> Result<Option<MetadataInfo>> {
+    async fn try_spotify(&self, artist: &str, title: &str, album: Option<&str>) -> Result<Option<MetadataInfo>> {
         if let Some(access_token) = self.api_keys.get("spotify") {
-            let query = format!("artist:{} track:{}", artist, title);
-            let url = format!(
-                "https://api.spotify.com/v1/search?q={}&type=track&limit=1",
-                urlencoding::encode(&query)
-            );
+            // Try multiple search strategies for better results (ordered by specificity)
+            let mut search_strategies = vec![
+                // Strategy 1: Most specific - Artist + Title + Album (if available)
+                if album.is_some() {
+                    format!("artist:\"{}\" track:\"{}\" album:\"{}\"", artist, title, album.unwrap())
+                } else {
+                    format!("artist:\"{}\" track:\"{}\"", artist, title)
+                },
+                // Strategy 2: Exact match with quotes for precise results
+                format!("\"{}\" \"{}\"", artist, title),
+                // Strategy 3: Artist field with flexible title
+                format!("artist:\"{}\" {}", artist, title),
+                // Strategy 4: Flexible artist with title field
+                format!("{} track:\"{}\"", artist, title),
+                // Strategy 5: Simple concatenation (most flexible)
+                format!("{} {}", artist, title),
+                // Strategy 6: Cleaned versions (remove special chars) - last resort
+                format!("{} {}", self.clean_search_term(artist), self.clean_search_term(title)),
+            ];
 
-            let response = self.client
-                .get(&url)
-                .header("Authorization", format!("Bearer {}", access_token))
-                .send()
-                .await?;
-            
-            if response.status().is_success() {
-                let json: Value = response.json().await?;
-                if let Some(tracks) = json["tracks"]["items"].as_array() {
-                    if let Some(track) = tracks.first() {
-                        return Ok(Some(self.parse_spotify_track(track)));
+            // Add additional album-based strategies if album is available
+            if let Some(album_name) = album {
+                search_strategies.extend(vec![
+                    // Strategy 7: Simple concatenation with album
+                    format!("{} {} {}", artist, title, album_name),
+                    // Strategy 8: Title + Album (when artist might be different)
+                    format!("track:\"{}\" album:\"{}\"", title, album_name),
+                    // Strategy 9: Cleaned versions with album
+                    format!("{} {} {}", self.clean_search_term(artist), self.clean_search_term(title), self.clean_search_term(album_name)),
+                ]);
+            }
+
+            for (i, query) in search_strategies.iter().enumerate() {
+                log::debug!("🎵 [SPOTIFY] Trying search strategy {}: {}", i + 1, query);
+                
+                let url = format!(
+                    "https://api.spotify.com/v1/search?q={}&type=track&limit=5",
+                    urlencoding::encode(query)
+                );
+
+                let response = self.client
+                    .get(&url)
+                    .header("Authorization", format!("Bearer {}", access_token))
+                    .send()
+                    .await?;
+                
+                if response.status().is_success() {
+                    let json: Value = response.json().await?;
+                    if let Some(tracks) = json["tracks"]["items"].as_array() {
+                        if !tracks.is_empty() {
+                            // Try to find the best match from the results
+                            if let Some(best_track) = self.find_best_spotify_match(tracks, artist, title, album) {
+                                let track_name = best_track["name"].as_str().unwrap_or("Unknown");
+                                let track_artist = best_track["artists"][0]["name"].as_str().unwrap_or("Unknown");
+                                log::info!("✅ [SPOTIFY] Found match with strategy {}: {} - {}", i + 1, track_artist, track_name);
+                                return Ok(Some(self.parse_spotify_track(best_track)));
+                            } else {
+                                log::debug!("❌ [SPOTIFY] No good match found with strategy {}", i + 1);
+                            }
+                        }
                     }
+                } else {
+                    log::debug!("❌ [SPOTIFY] Strategy {} failed with status: {}", i + 1, response.status());
                 }
             }
         }
 
         Ok(None)
     }
+
+    fn find_best_spotify_match<'a>(&self, tracks: &'a [Value], target_artist: &str, target_title: &str, target_album: Option<&str>) -> Option<&'a Value> {
+        let target_artist_lower = target_artist.to_lowercase();
+        let target_title_lower = target_title.to_lowercase();
+        let target_album_lower = target_album.map(|a| a.to_lowercase());
+        
+        // Score each track based on similarity
+        let mut best_track = None;
+        let mut best_score = 0.0;
+        
+        for track in tracks {
+            let track_title = track["name"].as_str().unwrap_or("").to_lowercase();
+            let track_artists: Vec<String> = track["artists"].as_array()
+                .map(|arr| arr.iter()
+                    .filter_map(|artist| artist["name"].as_str())
+                    .map(|name| name.to_lowercase())
+                    .collect())
+                .unwrap_or_default();
+            let track_album = track["album"]["name"].as_str().unwrap_or("").to_lowercase();
+            
+            // Calculate similarity score
+            let mut score = 0.0;
+            
+            // Title similarity (most important)
+            if track_title.contains(&target_title_lower) || target_title_lower.contains(&track_title) {
+                score += 50.0;
+            } else {
+                // Partial title match
+                let title_words: Vec<&str> = target_title_lower.split_whitespace().collect();
+                let track_words: Vec<&str> = track_title.split_whitespace().collect();
+                let matching_words = title_words.iter().filter(|word| track_words.contains(word)).count();
+                score += (matching_words as f32 / title_words.len() as f32) * 30.0;
+            }
+            
+            // Artist similarity
+            for track_artist in &track_artists {
+                if track_artist.contains(&target_artist_lower) || target_artist_lower.contains(track_artist) {
+                    score += 30.0;
+                    break;
+                } else {
+                    // Partial artist match
+                    let artist_words: Vec<&str> = target_artist_lower.split_whitespace().collect();
+                    let track_artist_words: Vec<&str> = track_artist.split_whitespace().collect();
+                    let matching_words = artist_words.iter().filter(|word| track_artist_words.contains(word)).count();
+                    score += (matching_words as f32 / artist_words.len() as f32) * 20.0;
+                }
+            }
+            
+            // Album similarity (bonus points if album matches)
+            if let Some(ref target_album_lower) = target_album_lower {
+                if track_album.contains(target_album_lower) || target_album_lower.contains(&track_album) {
+                    score += 25.0;
+                } else {
+                    // Partial album match
+                    let album_words: Vec<&str> = target_album_lower.split_whitespace().collect();
+                    let track_album_words: Vec<&str> = track_album.split_whitespace().collect();
+                    let matching_words = album_words.iter().filter(|word| track_album_words.contains(word)).count();
+                    score += (matching_words as f32 / album_words.len() as f32) * 15.0;
+                }
+            }
+            
+            // Bonus for exact matches
+            if track_title == target_title_lower {
+                score += 20.0;
+            }
+            if track_artists.iter().any(|a| a == &target_artist_lower) {
+                score += 20.0;
+            }
+            if let Some(ref target_album_lower) = target_album_lower {
+                if track_album == *target_album_lower {
+                    score += 15.0;
+                }
+            }
+            
+            if score > best_score {
+                best_score = score;
+                best_track = Some(track);
+            }
+        }
+        
+        // Only return if we have a reasonable match (score > 50 for better accuracy)
+        if best_score > 50.0 {
+            log::debug!("✅ [SPOTIFY] Best match found with score: {:.1}", best_score);
+            best_track
+        } else {
+            log::debug!("❌ [SPOTIFY] No good match found (best score: {:.1}, threshold: 50.0)", best_score);
+            None
+        }
+    }
+
+    fn clean_search_term(&self, term: &str) -> String {
+        term.chars()
+            .filter(|c| c.is_alphanumeric() || c.is_whitespace() || *c == '-' || *c == '_')
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
 
     async fn try_musicbrainz(&self, artist: &str, title: &str) -> Result<Option<MetadataInfo>> {
         // Clean up the artist and title for better search results
@@ -317,23 +463,6 @@ impl MetadataProvider {
         }
     }
 
-    fn clean_search_term(&self, term: &str) -> String {
-        // Remove common suffixes and clean up the search term
-        term
-            .replace(" (Lyrics)", "")
-            .replace(" (Official Video)", "")
-            .replace(" (Official Audio)", "")
-            .replace(" (Official)", "")
-            .replace(" [Official Video]", "")
-            .replace(" [Official Audio]", "")
-            .replace(" [Official]", "")
-            .replace(" - Lyrics", "")
-            .replace(" - Official Video", "")
-            .replace(" - Official Audio", "")
-            .replace(" - Official", "")
-            .trim()
-            .to_string()
-    }
 
     async fn try_deezer(&self, artist: &str, title: &str) -> Result<Option<MetadataInfo>> {
         if let Some(_api_key) = self.api_keys.get("deezer") {
@@ -484,11 +613,14 @@ impl MetadataProvider {
     }
 
     fn parse_spotify_track(&self, track: &Value) -> MetadataInfo {
-        // Sanitize strings to prevent JSON issues
+        // Sanitize strings to prevent JSON issues while preserving proper Unicode characters
         let sanitize_str = |s: Option<&str>| -> String {
             s.map(|s| {
                 s.chars()
-                    .filter(|c| !c.is_control() && *c != '\u{FFFD}')
+                    .filter(|c| {
+                        // Keep all printable characters and common Unicode punctuation
+                        !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t'
+                    })
                     .collect::<String>()
                     .trim()
                     .to_string()
@@ -536,11 +668,14 @@ impl MetadataProvider {
     }
 
     fn parse_musicbrainz_recording(&self, recording: &Value) -> MetadataInfo {
-        // Sanitize strings to prevent JSON issues
+        // Sanitize strings to prevent JSON issues while preserving proper Unicode characters
         let sanitize_str = |s: Option<&str>| -> String {
             s.map(|s| {
                 s.chars()
-                    .filter(|c| !c.is_control() && *c != '\u{FFFD}')
+                    .filter(|c| {
+                        // Keep all printable characters and common Unicode punctuation
+                        !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t'
+                    })
                     .collect::<String>()
                     .trim()
                     .to_string()
@@ -631,11 +766,14 @@ impl MetadataProvider {
     }
 
     fn parse_deezer_track(&self, track: &Value) -> MetadataInfo {
-        // Sanitize strings to prevent JSON issues
+        // Sanitize strings to prevent JSON issues while preserving proper Unicode characters
         let sanitize_str = |s: Option<&str>| -> String {
             s.map(|s| {
                 s.chars()
-                    .filter(|c| !c.is_control() && *c != '\u{FFFD}')
+                    .filter(|c| {
+                        // Keep all printable characters and common Unicode punctuation
+                        !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t'
+                    })
                     .collect::<String>()
                     .trim()
                     .to_string()

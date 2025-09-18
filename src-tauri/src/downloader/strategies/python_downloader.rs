@@ -21,10 +21,15 @@ impl PythonDownloader {
 #[async_trait]
 impl Downloader for PythonDownloader {
     async fn download(&self, task: &DownloadTask) -> Result<()> {
-        log::info!("Started Downloading: {} - {}", task.track_info.artist, task.track_info.title);
+        log::info!("🚀 Started Downloading: {} - {}", task.track_info.artist, task.track_info.title);
+        log::info!("📁 Output path: {:?}", task.output_path);
+        log::info!("🔗 URL: {}", task.track_info.url);
+        log::info!("📊 Task ID: {}", task.id);
         
         // Get FFmpeg path
+        log::info!("🔍 Getting FFmpeg path...");
         let ffmpeg_path = get_ffmpeg_path().await?;
+        log::info!("✅ FFmpeg path: {:?}", ffmpeg_path);
         
         // Get download directory from output path (parent of tracks folder)
         let download_dir = task.output_path.parent()
@@ -32,8 +37,10 @@ impl Downloader for PythonDownloader {
             .unwrap_or(std::path::Path::new("."))
             .to_string_lossy()
             .to_string();
+        log::info!("📂 Download directory: {}", download_dir);
 
         // Step 1: Download audio file (without metadata embedding)
+        log::info!("📝 Preparing download request...");
         let download_request = json!({
             "action": "download",
             "task_id": task.id,
@@ -112,12 +119,15 @@ impl Downloader for PythonDownloader {
             let final_metadata = metadata;
             
             
-            // Sanitize Unicode strings to prevent JSON serialization errors
+            // Sanitize Unicode strings to prevent JSON serialization errors while preserving proper Unicode characters
             let sanitize_string = |s: Option<String>| -> Option<String> {
                 s.map(|s| {
-                    // Remove or replace problematic Unicode characters
+                    // Keep all printable characters and common Unicode punctuation
                     s.chars()
-                        .filter(|c| c.is_ascii() || !c.is_control())
+                        .filter(|c| {
+                            // Keep all printable characters and common Unicode punctuation
+                            !c.is_control() || *c == '\n' || *c == '\r' || *c == '\t'
+                        })
                         .collect::<String>()
                         .trim()
                         .to_string()

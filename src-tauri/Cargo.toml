@@ -24,7 +24,7 @@ async-trait = "0.1"
 thiserror = "1.0"
 log = "0.4"
 env_logger = "0.10"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "stream", "multipart", "gzip", "brotli", "socks"] }
 url = "2.4"
 uuid = { version = "1.0", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -41,6 +41,19 @@ rpassword = "7.3"
 clap = { version = "4.0", features = ["derive"] }
 urlencoding = "2.1"
 futures = "0.3"
+# HTTP and networking
+hyper = { version = "0.14", features = ["full"] }
+hyper-rustls = "0.24"
+# Caching
+moka = { version = "0.12", features = ["future"] }
+# Audio processing
+symphonia = { version = "0.5", features = ["mp3", "aac", "flac", "wav", "vorbis"] }
+# File operations
+tempfile = "3.8"
+# Progress tracking
+indicatif = "0.17"
+# Stream utilities
+futures-util = "0.3"
 
 [features]
 default = ["custom-protocol"]

@@ -1,5 +1,11 @@
 pub mod manager;
 pub mod strategies;
+pub mod http_pool;
+pub mod cache;
+pub mod ytdlp_rust;
+
+#[cfg(test)]
+mod integration_test;
 
 use serde::{Deserialize, Serialize};
 use crate::errors::Result;

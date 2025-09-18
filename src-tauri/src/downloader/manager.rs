@@ -1,6 +1,7 @@
 use crate::downloader::{Downloader, DownloadTask, DownloadStatus, DownloadProgress};
-use crate::downloader::strategies::python_downloader::PythonDownloader;
+use crate::downloader::strategies::{PythonDownloader, RustYtDlpDownloader};
 use crate::errors::Result;
+use crate::config::AppConfig;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -11,22 +12,47 @@ pub struct DownloadManager {
     downloaders: Vec<Arc<dyn Downloader + Send + Sync>>,
     max_concurrent: usize,
     active_downloads: Arc<Mutex<usize>>,
+    config: Arc<Mutex<AppConfig>>,
 }
 
 impl DownloadManager {
-    pub fn new(max_concurrent: usize) -> Self {
+    pub fn new(max_concurrent: usize, config: AppConfig) -> Self {
         let mut downloaders: Vec<Arc<dyn Downloader + Send + Sync>> = Vec::new();
+        
+        // Add Rust yt-dlp downloader (primary) FIRST
+        log::info!("🔧 Initializing Rust yt-dlp downloader...");
+        match RustYtDlpDownloader::new(config.clone()) {
+            Ok(rust_downloader) => {
+                downloaders.push(Arc::new(rust_downloader));
+                log::info!("✅ Rust yt-dlp downloader initialized successfully");
+            },
+            Err(e) => {
+                log::error!("❌ Failed to initialize Rust yt-dlp downloader: {}", e);
+                log::warn!("⚠️ Using Python fallback only");
+            }
+        }
+        
+        // Add Python downloader (fallback) SECOND
         downloaders.push(Arc::new(PythonDownloader::new()));
+        
+        log::info!("📊 Total downloaders available: {}", downloaders.len());
+        for (i, downloader) in downloaders.iter().enumerate() {
+            log::info!("  {}. {}", i + 1, downloader.get_name());
+        }
         
         let manager = Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
             downloaders,
             max_concurrent,
             active_downloads: Arc::new(Mutex::new(0)),
+            config: Arc::new(Mutex::new(config)),
         };
         
         // Start background progress updater
         manager.start_progress_updater();
+        
+        // Start background queue processor
+        manager.start_queue_processor();
         
         manager
     }
@@ -63,10 +89,7 @@ impl DownloadManager {
             tasks.insert(task_id.clone(), task);
         }
 
-        // Start processing if auto_start is enabled and we have capacity
-        if auto_start {
-            self.process_queue().await?;
-        }
+        // Background processor will handle queue processing automatically
 
         Ok(task_id)
     }
@@ -279,76 +302,142 @@ impl DownloadManager {
         });
     }
 
-    async fn process_queue(&self) -> Result<()> {
-        let active_count = *self.active_downloads.lock().await;
-        if active_count >= self.max_concurrent {
-            return Ok(());
-        }
+    fn start_queue_processor(&self) {
+        let tasks = self.tasks.clone();
+        let active_downloads = self.active_downloads.clone();
+        let max_concurrent = self.max_concurrent;
+        let downloaders = self.downloaders.clone();
+        let config = self.config.clone();
+        
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500)); // Check every 500ms
+            loop {
+                interval.tick().await;
+                
+                // Check if auto-start downloads is enabled
+                let auto_start_enabled = {
+                    let config_guard = config.lock().await;
+                    config_guard.ui.auto_start_downloads
+                };
+                
+                // Always process the queue to continue downloads that were manually started
+                // Only skip if auto-start is disabled AND there are no active downloads
+                let active_count = *active_downloads.lock().await;
+                if !auto_start_enabled && active_count == 0 {
+                    continue; // Skip processing if auto-start is disabled and no active downloads
+                }
+                
+                // Process as many pending downloads as possible up to max_concurrent
+                loop {
+                    let active_count = *active_downloads.lock().await;
+                    if active_count >= max_concurrent {
+                        break; // No more capacity
+                    }
 
-        let tasks = self.tasks.lock().await;
-        let pending_tasks: Vec<String> = tasks
-            .values()
-            .filter(|task| task.status == DownloadStatus::Pending)
-            .map(|task| task.id.clone())
-            .collect();
+                    let tasks_guard = tasks.lock().await;
+                    let pending_tasks: Vec<String> = tasks_guard
+                        .values()
+                        .filter(|task| task.status == crate::downloader::DownloadStatus::Pending)
+                        .map(|task| task.id.clone())
+                        .collect();
+                    drop(tasks_guard);
+                    
+                    if pending_tasks.is_empty() {
+                        break; // No more pending tasks
+                    }
 
-        drop(tasks);
+                    // Only start new downloads if auto-start is enabled OR if there are already active downloads
+                    if !auto_start_enabled && active_count == 0 {
+                        break; // Don't start new downloads if auto-start is disabled and no active downloads
+                    }
 
-        for task_id in pending_tasks {
-            let active_count = *self.active_downloads.lock().await;
-            if active_count >= self.max_concurrent {
-                break;
-            }
+                    let next_task_id = pending_tasks[0].clone();
+                    log::info!("🔄 [AUTO-QUEUE] Background processor starting download: {}", next_task_id);
+                    
+                    // Update task status to downloading
+                    if let Err(e) = Self::update_task_status_static(&tasks, &next_task_id, crate::downloader::DownloadStatus::Downloading, None).await {
+                        log::error!("Failed to update task status: {}", e);
+                        break;
+                    }
 
-            if let Some(task) = self.get_task(&task_id).await? {
-                if let Some(downloader) = self.find_suitable_downloader(&task) {
-                    let downloader = downloader.clone();
-                    let task_id = task_id.clone();
-                    let tasks = self.tasks.clone();
-                    let active_downloads = self.active_downloads.clone();
+                    // Increment active downloads counter
+                    {
+                        let mut active_count = active_downloads.lock().await;
+                        *active_count += 1;
+                    }
 
+                    // Start the download in a separate task
+                    let tasks_clone = tasks.clone();
+                    let downloaders_clone = downloaders.clone();
+                    let active_downloads_clone = active_downloads.clone();
+                    let max_concurrent_clone = max_concurrent;
+                    let next_task_id_clone = next_task_id.clone();
+                    
                     tokio::spawn(async move {
-                        {
-                            let mut tasks = tasks.lock().await;
-                            if let Some(task) = tasks.get_mut(&task_id) {
-                                task.status = DownloadStatus::Downloading;
-                                task.started_at = Some(chrono::Utc::now());
-                            }
+                        if let Err(e) = Self::process_single_download_static(tasks_clone, downloaders_clone, max_concurrent_clone, active_downloads_clone, next_task_id_clone).await {
+                            log::error!("Background download failed: {}", e);
                         }
-
-                        *active_downloads.lock().await += 1;
-
-                        let result = downloader.download(&task).await;
-
-                        {
-                            let mut tasks = tasks.lock().await;
-                            if let Some(task) = tasks.get_mut(&task_id) {
-                                match result {
-                                    Ok(_) => {
-                                        task.status = DownloadStatus::Completed;
-                                        task.progress = 100.0;
-                                        task.completed_at = Some(chrono::Utc::now());
-                                    }
-                                    Err(e) => {
-                                        task.status = DownloadStatus::Failed;
-                                        task.error = Some(e.to_string());
-                                    }
-                                }
-                            }
-                        }
-
-                        *active_downloads.lock().await -= 1;
                     });
                 }
             }
-        }
+        });
+    }
 
+    pub async fn process_queue(&self) -> Result<()> {
+        // Process as many pending downloads as possible up to max_concurrent
+        let mut processed_count = 0;
+        
+        loop {
+            let active_count = *self.active_downloads.lock().await;
+            if active_count >= self.max_concurrent {
+                log::info!("📊 Queue processing: Max concurrent downloads reached ({}/{})", active_count, self.max_concurrent);
+                break;
+            }
+
+            let tasks_guard = self.tasks.lock().await;
+            let pending_tasks: Vec<String> = tasks_guard
+                .values()
+                .filter(|task| task.status == crate::downloader::DownloadStatus::Pending)
+                .map(|task| task.id.clone())
+                .collect();
+            drop(tasks_guard);
+
+            if pending_tasks.is_empty() {
+                log::info!("📊 Queue processing: No pending tasks found");
+                break;
+            }
+
+            // Start the first pending task
+            let task_id = pending_tasks[0].clone();
+            log::info!("🔄 [QUEUE] Processing download: {}", task_id);
+            
+            self.start_download(task_id).await?;
+            
+            processed_count += 1;
+            log::info!("📊 Queue processing: Started {} downloads", processed_count);
+        }
+        
+        log::info!("📊 Queue processing completed: {} downloads started", processed_count);
         Ok(())
     }
 
     fn find_suitable_downloader(&self, task: &DownloadTask) -> Option<&Arc<dyn Downloader + Send + Sync>> {
-        // For now, just return the first available downloader
-        // In a more sophisticated implementation, we'd choose based on source URL
+        let format = task.track_info.format.as_deref().unwrap_or("mp3");
+        log::info!("🔍 Finding suitable downloader for format: {}", format);
+        log::info!("📋 Available downloaders: {:?}", self.downloaders.iter().map(|d| d.get_name()).collect::<Vec<_>>());
+        
+        // Use first suitable downloader (Rust is first, Python is fallback)
+        for downloader in &self.downloaders {
+            if downloader.supports_format(format) {
+                log::info!("✅ Using {} downloader for: {} - {}", downloader.get_name(), task.track_info.artist, task.track_info.title);
+                return Some(downloader);
+            } else {
+                log::info!("❌ {} doesn't support format: {}", downloader.get_name(), format);
+            }
+        }
+        
+        // Last resort: return first available
+        log::warn!("⚠️ No suitable downloader found, using first available");
         self.downloaders.first()
     }
 
@@ -416,7 +505,7 @@ impl DownloadManager {
     async fn process_single_download_static(
         tasks: Arc<Mutex<HashMap<String, DownloadTask>>>,
         downloaders: Vec<Arc<dyn Downloader + Send + Sync>>,
-        _max_concurrent: usize,
+        max_concurrent: usize,
         active_downloads: Arc<Mutex<usize>>,
         task_id: String,
     ) -> Result<()> {
@@ -447,8 +536,18 @@ impl DownloadManager {
             *active_count = active_count.saturating_sub(1);
         }
 
-        // Note: We don't process the queue here to avoid Send issues
-        // The queue will be processed by the main process_queue method
+        // Log that a slot is now available for the next download
+        let active_count = *active_downloads.lock().await;
+        let tasks_guard = tasks.lock().await;
+        let pending_count = tasks_guard
+            .values()
+            .filter(|task| task.status == crate::downloader::DownloadStatus::Pending)
+            .count();
+        drop(tasks_guard);
+
+        if pending_count > 0 {
+            log::info!("🔄 [AUTO-QUEUE] {} pending tasks available, {} active downloads. Background processor will handle them.", pending_count, active_count);
+        }
 
         Ok(())
     }
@@ -534,7 +633,7 @@ impl DownloadManager {
             return Ok(());
         }
 
-        let mut tasks_guard = tasks.lock().await;
+        let tasks_guard = tasks.lock().await;
         let pending_tasks: Vec<String> = tasks_guard
             .values()
             .filter(|task| task.status == crate::downloader::DownloadStatus::Pending)
@@ -573,4 +672,7 @@ impl DownloadManager {
 
         Ok(())
     }
+
+    // Automatic queue processor removed to prevent race conditions
+    // Use process_queue() method for manual queue processing instead
 }

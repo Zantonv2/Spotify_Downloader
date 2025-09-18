@@ -15,6 +15,7 @@ pub struct AppConfig {
     pub api_keys: ApiKeys,
     pub ui: UiConfig,
     pub proxy: Option<String>,
+    pub performance: PerformanceConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -39,6 +40,17 @@ pub struct UiConfig {
     pub minimize_to_tray: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PerformanceConfig {
+    pub enable_parallel_processing: bool,
+    pub max_concurrent_fragments: u32,
+    pub ffmpeg_threads: u32,
+    pub socket_timeout: u32,
+    pub enable_sponsorblock: bool,
+    pub gpu_acceleration: GpuAcceleration,
+    pub ffmpeg_hardware_accel: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum AudioQuality {
     Low,    // 128 kbps
@@ -55,6 +67,16 @@ pub enum AudioFormat {
     Wav,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub enum GpuAcceleration {
+    None,
+    Nvenc,      // NVIDIA GPU
+    Qsv,        // Intel Quick Sync Video
+    Amf,        // AMD GPU
+    VideoToolbox, // macOS
+    Auto,       // Auto-detect best available
+}
+
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
@@ -69,6 +91,7 @@ impl Default for AppConfig {
             api_keys: ApiKeys::default(),
             ui: UiConfig::default(),
             proxy: Some("http://127.0.0.1:1080".to_string()),
+            performance: PerformanceConfig::default(),
         }
     }
 }
@@ -97,6 +120,143 @@ impl Default for UiConfig {
             show_notifications: true,
             auto_start_downloads: true,
             minimize_to_tray: false,
+        }
+    }
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            enable_parallel_processing: true,
+            max_concurrent_fragments: 4,
+            ffmpeg_threads: 4,
+            socket_timeout: 15,
+            enable_sponsorblock: false, // Disabled for speed
+            gpu_acceleration: GpuAcceleration::Auto,
+            ffmpeg_hardware_accel: true,
+        }
+    }
+}
+
+impl PerformanceConfig {
+    /// Detect the best available GPU acceleration
+    pub fn detect_gpu_acceleration() -> GpuAcceleration {
+        log::info!("🔍 [GPU] Starting GPU detection...");
+        
+        // First, let's see what FFmpeg actually supports
+        if let Ok(output) = std::process::Command::new("ffmpeg")
+            .args(&["-hide_banner", "-encoders"])
+            .output() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            log::info!("🔍 [GPU] FFmpeg encoders available: {}", stdout);
+        }
+        // Check for NVIDIA GPU
+        if std::process::Command::new("nvidia-smi")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false) {
+            return GpuAcceleration::Nvenc;
+        }
+        
+        // Check for Intel Quick Sync (Windows)
+        if std::process::Command::new("ffmpeg")
+            .args(&["-hide_banner", "-encoders"])
+            .output()
+            .map(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                stdout.contains("h264_qsv") || stdout.contains("hevc_qsv")
+            })
+            .unwrap_or(false) {
+            return GpuAcceleration::Qsv;
+        }
+        
+        // Check for AMD GPU - try multiple detection methods
+        let amd_detected = std::process::Command::new("ffmpeg")
+            .args(&["-hide_banner", "-encoders"])
+            .output()
+            .map(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // Check for various AMD encoders
+                stdout.contains("h264_amf") || 
+                stdout.contains("hevc_amf") || 
+                stdout.contains("av1_amf") ||
+                stdout.contains("_amf")
+            })
+            .unwrap_or(false);
+            
+        if amd_detected {
+            return GpuAcceleration::Amf;
+        }
+        
+        // Alternative AMD detection - check for AMD hardware
+        if std::process::Command::new("wmic")
+            .args(&["path", "win32_VideoController", "get", "name"])
+            .output()
+            .map(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                stdout.to_lowercase().contains("amd") || 
+                stdout.to_lowercase().contains("radeon") ||
+                stdout.to_lowercase().contains("rx")
+            })
+            .unwrap_or(false) {
+            log::info!("🔍 [GPU] AMD GPU detected via WMI, trying AMF anyway...");
+            return GpuAcceleration::Amf;
+        }
+        
+        // Final fallback - if we're on Windows and have a modern system, try AMD anyway
+        #[cfg(target_os = "windows")]
+        {
+            log::info!("🔍 [GPU] No GPU detected via standard methods, trying AMD as fallback...");
+            return GpuAcceleration::Amf;
+        }
+        
+        #[cfg(not(target_os = "windows"))]
+        GpuAcceleration::None
+    }
+    
+    /// Get FFmpeg GPU acceleration arguments
+    pub fn get_gpu_args(&self) -> Vec<String> {
+        match self.gpu_acceleration {
+            GpuAcceleration::Nvenc => vec![
+                // NVIDIA hardware acceleration - minimal approach for audio
+                "-hwaccel".to_string(),
+                "cuda".to_string(),
+            ],
+            GpuAcceleration::Qsv => vec![
+                // Intel QSV hardware acceleration - minimal approach for audio
+                "-hwaccel".to_string(),
+                "qsv".to_string(),
+            ],
+            GpuAcceleration::Amf => vec![
+                // AMD hardware acceleration - disabled for audio-only conversion
+                // "-hwaccel".to_string(),
+                // "d3d11va".to_string(),
+            ],
+            GpuAcceleration::VideoToolbox => vec![
+                // macOS VideoToolbox hardware acceleration - minimal approach for audio
+                "-hwaccel".to_string(),
+                "videotoolbox".to_string(),
+            ],
+            GpuAcceleration::Auto => {
+                let detected = Self::detect_gpu_acceleration();
+                match detected {
+                    GpuAcceleration::Nvenc => vec![
+                        "-hwaccel".to_string(),
+                        "cuda".to_string(),
+                    ],
+                    GpuAcceleration::Qsv => vec![
+                        "-hwaccel".to_string(),
+                        "qsv".to_string(),
+                    ],
+                    GpuAcceleration::Amf => vec![
+                        // AMD hardware acceleration - disabled for audio-only conversion
+                        // "-hwaccel".to_string(),
+                        // "d3d11va".to_string(),
+                    ],
+                    _ => vec![],
+                }
+            },
+            GpuAcceleration::None => vec![],
         }
     }
 }

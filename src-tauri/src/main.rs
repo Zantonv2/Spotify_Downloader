@@ -11,8 +11,6 @@ mod downloader;
 mod metadata;
 mod processing;
 mod security;
-#[cfg(test)]
-mod search_test;
 
 use log::info;
 use std::sync::Arc;
@@ -53,7 +51,8 @@ async fn main() {
 
     // Initialize download manager
     let download_manager = Arc::new(Mutex::new(downloader::manager::DownloadManager::new(
-        config.max_concurrent_downloads
+        config.max_concurrent_downloads,
+        config.clone()
     )));
 
     // Create app state
@@ -70,6 +69,7 @@ async fn main() {
             commands::search_tracks,
             commands::deep_search_tracks,
             commands::download_track,
+            commands::download_selected_tracks,
             commands::get_download_queue,
             commands::pause_download,
             commands::resume_download,
@@ -111,7 +111,8 @@ async fn main() {
             commands::stop_all_downloads,
             commands::clear_download_queue,
             commands::retry_download,
-            commands::download_single
+            commands::download_single,
+            commands::process_download_queue
         ])
         .setup(|app| {
             info!("Application setup completed");

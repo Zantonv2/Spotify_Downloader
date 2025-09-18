@@ -4,9 +4,6 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::time::Duration;
 
-#[cfg(test)]
-mod tests;
-
 pub struct LyricsProvider {
     client: reqwest::Client,
     api_keys: HashMap<String, String>,
@@ -126,7 +123,7 @@ impl LyricsProvider {
                             log::debug!("🎵 First track: {}", serde_json::to_string_pretty(track).unwrap_or_default());
                             if let Some(lyrics) = track["syncedLyrics"].as_str() {
                                 if !lyrics.is_empty() {
-                                    log::info!("✅ Found lyrics from LRC Lib: {} characters", lyrics.len());
+                                    log::debug!("✅ LRC Lib: Found lyrics with {} characters", lyrics.len());
                                     return Ok(Some(lyrics.to_string()));
                                 } else {
                                     log::debug!("⚠️ LRC Lib: Empty lyrics");

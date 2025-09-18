@@ -15,6 +15,7 @@ interface DownloadQueueProps {
   onRemove: (taskId: string) => void
   onRefresh: () => void
   onDownloadAll?: () => void
+  onDownloadSelected?: (taskIds: string[]) => void
   onClearList?: () => void
 }
 
@@ -23,6 +24,7 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
   onRemove,
   onRefresh,
   onDownloadAll,
+  onDownloadSelected,
   onClearList
 }) => {
   const [autoRefresh] = useState(true)
@@ -169,6 +171,13 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
     setSelectedTasks(new Set())
   }
 
+  const downloadSelectedTasks = () => {
+    if (onDownloadSelected && selectedTasks.size > 0) {
+      onDownloadSelected(Array.from(selectedTasks))
+      setSelectedTasks(new Set())
+    }
+  }
+
   if (queue.length === 0) {
     return (
       <div className="glass-card text-center py-12">
@@ -194,6 +203,14 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
                 <span className="text-sm text-glass-300">
                   {selectedTasks.size} selected
                 </span>
+                <button
+                  onClick={downloadSelectedTasks}
+                  className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 text-white font-bold py-2 px-4 rounded-lg flex items-center space-x-2 transition-all duration-200 shadow-lg"
+                  disabled={!onDownloadSelected}
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Download Selected</span>
+                </button>
                 <button
                   onClick={removeSelectedTasks}
                   className="text-red-400 hover:text-red-300 hover:bg-red-400/20 px-3 py-2 rounded-lg flex items-center space-x-2 transition-all duration-200"
