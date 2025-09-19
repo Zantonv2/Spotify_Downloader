@@ -1,6 +1,7 @@
 import React from 'react'
 import { 
-  X
+  X,
+  RotateCcw
 } from 'lucide-react'
 import { DownloadTask } from '../types'
 
@@ -9,6 +10,7 @@ interface CompactTrackCardProps {
   onRemove: (taskId: string) => void
   isSelected?: boolean
   onSelect?: (taskId: string, event: React.MouseEvent) => void
+  onRetry?: (taskId: string) => void
 }
 
 const CompactTrackCard: React.FC<CompactTrackCardProps> = ({
@@ -16,6 +18,7 @@ const CompactTrackCard: React.FC<CompactTrackCardProps> = ({
   onRemove,
   isSelected = false,
   onSelect,
+  onRetry,
 }) => {
   // Helper to format duration from seconds to MM:SS
   const formatDuration = (seconds?: number) => {
@@ -34,17 +37,31 @@ const CompactTrackCard: React.FC<CompactTrackCardProps> = ({
       }`}
       onClick={(e) => onSelect?.(task.id, e)}
     >
-      {/* Remove Button (X) - Top Right */}
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          onRemove(task.id)
-        }}
-        className="absolute top-2 right-2 p-1 rounded-full text-gray-600 hover:bg-red-500/20 hover:text-red-400 transition-colors duration-200 z-10"
-        title="Remove track"
-      >
-        <X className="w-4 h-4" />
-      </button>
+      {/* Action Buttons - Top Right */}
+      <div className="absolute top-2 right-2 flex items-center space-x-1 z-10">
+        {task.status === 'failed' && onRetry && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onRetry(task.id)
+            }}
+            className="p-1 rounded-full text-gray-600 hover:bg-orange-500/20 hover:text-orange-400 transition-colors duration-200"
+            title="Retry download"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        )}
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onRemove(task.id)
+          }}
+          className="p-1 rounded-full text-gray-600 hover:bg-red-500/20 hover:text-red-400 transition-colors duration-200"
+          title="Remove track"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
 
       {/* Top Section: Album Art, Title, Artist/Album, Duration */}
       <div className="flex items-start space-x-3 mb-3">

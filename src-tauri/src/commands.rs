@@ -147,6 +147,7 @@ pub async fn download_track(
                 AudioQuality::Medium => "medium".to_string(),
                 AudioQuality::High => "high".to_string(),
                 AudioQuality::Best => "best".to_string(),
+                AudioQuality::Lossless => "lossless".to_string(),
             };
             println!("Sending quality to Python: '{}'", quality_str);
             quality_str
@@ -493,12 +494,16 @@ pub async fn get_settings(
             AudioQuality::Medium => "medium", 
             AudioQuality::High => "high",
             AudioQuality::Best => "best",
+            AudioQuality::Lossless => "lossless",
         },
         "preferred_format": match config.preferred_format {
             AudioFormat::Mp3 => "mp3",
             AudioFormat::M4a => "m4a",
             AudioFormat::Flac => "flac",
             AudioFormat::Wav => "wav",
+            AudioFormat::Ogg => "ogg",
+            AudioFormat::Opus => "opus",
+            AudioFormat::Ape => "ape",
         },
         "enable_metadata": config.enable_metadata,
         "enable_lyrics": config.enable_lyrics,
@@ -1016,12 +1021,16 @@ pub async fn bulk_download_spotify_tracks(
                 AudioQuality::Medium => "medium".to_string(),
                 AudioQuality::High => "high".to_string(),
                 AudioQuality::Best => "best".to_string(),
+                AudioQuality::Lossless => "lossless".to_string(),
             });
             track_info.format = Some(match preferred_format {
                 AudioFormat::Mp3 => "mp3".to_string(),
                 AudioFormat::M4a => "m4a".to_string(),
                 AudioFormat::Flac => "flac".to_string(),
                 AudioFormat::Wav => "wav".to_string(),
+                AudioFormat::Ogg => "ogg".to_string(),
+                AudioFormat::Opus => "opus".to_string(),
+                AudioFormat::Ape => "ape".to_string(),
             });
             
             // Use sanitized filename with proper path and correct extension
@@ -1031,6 +1040,9 @@ pub async fn bulk_download_spotify_tracks(
                 AudioFormat::M4a => "m4a",
                 AudioFormat::Flac => "flac",
                 AudioFormat::Wav => "wav",
+                AudioFormat::Ogg => "ogg",
+                AudioFormat::Opus => "opus",
+                AudioFormat::Ape => "ape",
             };
             let tracks_dir = output_dir.join("tracks");
             let output_path = tracks_dir.join(format!("{}.{}", sanitized_filename, extension));
@@ -1198,5 +1210,32 @@ fn extract_year_from_date(date_str: &str) -> Option<u32> {
         date_str[0..4].parse::<u32>().ok()
     } else {
         None
+    }
+}
+
+#[tauri::command]
+pub async fn verify_downloads(
+    state: State<'_, AppState>,
+    output_directory: String,
+) -> Result<serde_json::Value, String> {
+    let download_manager = state.download_manager.lock().await;
+    let output_path = std::path::PathBuf::from(output_directory);
+    
+    match download_manager.verify_downloads(&output_path).await {
+        Ok(verification) => {
+            let result = serde_json::json!({
+                "total_tasks": verification.total_tasks,
+                "completed_tasks": verification.completed_tasks,
+                "actual_files": verification.actual_files,
+                "missing_files": verification.missing_files,
+                "oversized_files": verification.oversized_files,
+                "success": true
+            });
+            Ok(result)
+        },
+        Err(e) => {
+            log::error!("Download verification failed: {}", e);
+            Err(format!("Verification failed: {}", e))
+        }
     }
 }

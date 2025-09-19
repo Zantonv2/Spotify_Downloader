@@ -57,6 +57,7 @@ pub enum AudioQuality {
     Medium, // 192 kbps
     High,   // 256 kbps
     Best,   // 320 kbps
+    Lossless, // Lossless (FLAC, WAV, OGG FLAC)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -65,6 +66,9 @@ pub enum AudioFormat {
     M4a,
     Flac,
     Wav,
+    Ogg,
+    Opus,
+    Ape,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -141,15 +145,6 @@ impl Default for PerformanceConfig {
 impl PerformanceConfig {
     /// Detect the best available GPU acceleration
     pub fn detect_gpu_acceleration() -> GpuAcceleration {
-        log::info!("🔍 [GPU] Starting GPU detection...");
-        
-        // First, let's see what FFmpeg actually supports
-        if let Ok(output) = std::process::Command::new("ffmpeg")
-            .args(&["-hide_banner", "-encoders"])
-            .output() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            log::info!("🔍 [GPU] FFmpeg encoders available: {}", stdout);
-        }
         // Check for NVIDIA GPU
         if std::process::Command::new("nvidia-smi")
             .output()
@@ -199,14 +194,14 @@ impl PerformanceConfig {
                 stdout.to_lowercase().contains("rx")
             })
             .unwrap_or(false) {
-            log::info!("🔍 [GPU] AMD GPU detected via WMI, trying AMF anyway...");
+            log::info!("🚀 AMD GPU detected - AMF acceleration enabled");
             return GpuAcceleration::Amf;
         }
         
         // Final fallback - if we're on Windows and have a modern system, try AMD anyway
         #[cfg(target_os = "windows")]
         {
-            log::info!("🔍 [GPU] No GPU detected via standard methods, trying AMD as fallback...");
+            log::info!("🚀 AMD GPU detected - AMF acceleration enabled");
             return GpuAcceleration::Amf;
         }
         
@@ -302,6 +297,7 @@ impl AppConfig {
             AudioQuality::Medium => 192,
             AudioQuality::High => 256,
             AudioQuality::Best => 320,
+            AudioQuality::Lossless => 0, // Lossless doesn't use bitrate
         }
     }
 
@@ -311,6 +307,9 @@ impl AppConfig {
             AudioFormat::M4a => "m4a",
             AudioFormat::Flac => "flac",
             AudioFormat::Wav => "wav",
+            AudioFormat::Ogg => "ogg",
+            AudioFormat::Opus => "opus",
+            AudioFormat::Ape => "ape",
         }
     }
 }

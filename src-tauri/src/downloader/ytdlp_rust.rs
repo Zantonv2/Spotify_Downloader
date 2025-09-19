@@ -8,7 +8,7 @@ use crate::errors::Result;
 use crate::downloader::{Downloader, DownloadTask, DownloadProgress};
 use crate::downloader::http_pool::HttpPool;
 use crate::downloader::cache::CacheManager;
-use crate::metadata::MetadataInfo;
+use crate::metadata::{MetadataInfo, CoverArtData};
 use crate::metadata::providers::MetadataProvider;
 use crate::metadata::lyrics::LyricsProvider;
 use crate::config::AppConfig;
@@ -151,20 +151,12 @@ impl YtDlpExtractor {
         let json_output = String::from_utf8(output.stdout)
             .map_err(|e| crate::errors::AppError::DownloadError(format!("Invalid UTF-8 in yt-dlp output: {}", e)))?;
         
-        log::info!("📝 [SEARCH] JSON output length: {} characters", json_output.len());
-        log::info!("📄 [SEARCH] Raw output: {}", json_output);
-        
         let mut results = Vec::new();
         let lines: Vec<&str> = json_output.lines().collect();
-        log::info!("📊 [SEARCH] Processing {} lines of output", lines.len());
 
-        for (i, line) in lines.iter().enumerate() {
-            log::info!("🔍 [SEARCH] Processing line {}: {}", i + 1, line);
+        for line in lines.iter() {
             if let Ok(info) = serde_json::from_str::<VideoInfo>(line) {
-                log::info!("✅ [SEARCH] Successfully parsed video: {}", info.title);
                 results.push(info);
-            } else {
-                log::warn!("⚠️ [SEARCH] Failed to parse line {}: {}", i + 1, line);
             }
         }
 
@@ -330,15 +322,15 @@ impl RustYtDlpDownloader {
         if config.performance.ffmpeg_hardware_accel {
             let detected_gpu = crate::config::PerformanceConfig::detect_gpu_acceleration();
             match detected_gpu {
-                crate::config::GpuAcceleration::Nvenc => log::info!("🚀 [GPU] NVIDIA GPU detected - CUDA acceleration enabled"),
-                crate::config::GpuAcceleration::Qsv => log::info!("🚀 [GPU] Intel Quick Sync detected - QSV acceleration enabled"),
-                crate::config::GpuAcceleration::Amf => log::info!("🚀 [GPU] AMD GPU detected - AMF acceleration enabled"),
-                crate::config::GpuAcceleration::VideoToolbox => log::info!("🚀 [GPU] macOS VideoToolbox detected - hardware acceleration enabled"),
-                crate::config::GpuAcceleration::None => log::info!("⚠️ [GPU] No GPU acceleration detected - using CPU only"),
-                crate::config::GpuAcceleration::Auto => log::info!("🔍 [GPU] Auto-detecting GPU acceleration..."),
+                crate::config::GpuAcceleration::Nvenc => log::info!("🚀 NVIDIA GPU detected - CUDA acceleration enabled"),
+                crate::config::GpuAcceleration::Qsv => log::info!("🚀 Intel Quick Sync detected - QSV acceleration enabled"),
+                crate::config::GpuAcceleration::Amf => log::info!("🚀 AMD GPU detected - AMF acceleration enabled"),
+                crate::config::GpuAcceleration::VideoToolbox => log::info!("🚀 macOS VideoToolbox detected - hardware acceleration enabled"),
+                crate::config::GpuAcceleration::None => log::info!("⚠️ No GPU acceleration detected - using CPU only"),
+                crate::config::GpuAcceleration::Auto => log::info!("🔍 Auto-detecting GPU acceleration..."),
             }
         } else {
-            log::info!("💻 [GPU] GPU acceleration disabled - using CPU only");
+            log::info!("💻 GPU acceleration disabled - using CPU only");
         }
         
         Self {
@@ -398,12 +390,59 @@ impl RustYtDlpDownloader {
         let format = self.config.get_format_extension();
         let bitrate = self.config.get_quality_bitrate();
         
+        log::info!("🎵 [CONFIG] Using audio format: {}", format);
+        log::info!("🎵 [CONFIG] Using bitrate: {}k", bitrate);
+        log::info!("🎵 [CONFIG] Using quality: {:?}", self.config.preferred_quality);
+        
         // Build FFmpeg postprocessor args with GPU acceleration
         let mut ffmpeg_args = vec![
-            format!("-c:a {}", if format == "m4a" { "aac" } else if format == "mp3" { "libmp3lame" } else { "copy" }),
-            format!("-b:a {}k", bitrate),
             format!("-threads {}", self.config.performance.ffmpeg_threads),
         ];
+        
+        // Add codec and quality settings based on format
+        if format == "ogg" {
+            match self.config.preferred_quality {
+                crate::config::AudioQuality::Lossless => {
+                    // Lossless OGG (FLAC in OGG container)
+                    ffmpeg_args.push("-c:a".to_string());
+                    ffmpeg_args.push("flac".to_string());
+                    ffmpeg_args.push("-compression_level".to_string());
+                    ffmpeg_args.push("5".to_string()); // Good balance of compression and speed
+                    log::info!("🎵 [CONFIG] Using OGG FLAC (lossless)");
+                },
+                _ => {
+                    // OGG Vorbis uses quality settings (0-10) instead of bitrate
+                    ffmpeg_args.push("-c:a".to_string());
+                    ffmpeg_args.push("libvorbis".to_string());
+                    let vorbis_quality = match self.config.preferred_quality {
+                        crate::config::AudioQuality::Low => "2",     // ~128kbps
+                        crate::config::AudioQuality::Medium => "4",  // ~192kbps  
+                        crate::config::AudioQuality::High => "6",    // ~256kbps
+                        crate::config::AudioQuality::Best => "8",    // ~320kbps
+                        _ => "6", // Default to high quality
+                    };
+                    ffmpeg_args.push(format!("-q:a {}", vorbis_quality));
+                    log::info!("🎵 [CONFIG] Using OGG Vorbis quality: {}", vorbis_quality);
+                }
+            }
+        } else if format == "opus" {
+            // Opus uses bitrate settings
+            ffmpeg_args.push("-c:a".to_string());
+            ffmpeg_args.push("libopus".to_string());
+            ffmpeg_args.push(format!("-b:a {}k", bitrate));
+            log::info!("🎵 [CONFIG] Using Opus codec with {}k bitrate", bitrate);
+        } else if format == "ape" {
+            // APE is lossless only
+            ffmpeg_args.push("-c:a".to_string());
+            ffmpeg_args.push("ape".to_string());
+            ffmpeg_args.push("-compression_level".to_string());
+            ffmpeg_args.push("1000".to_string()); // High compression
+            log::info!("🎵 [CONFIG] Using APE (lossless)");
+        } else {
+            // Other formats use standard codec and bitrate
+            ffmpeg_args.push(format!("-c:a {}", if format == "m4a" { "aac" } else if format == "mp3" { "libmp3lame" } else if format == "flac" { "flac" } else if format == "wav" { "pcm_s16le" } else { "copy" }));
+            ffmpeg_args.push(format!("-b:a {}k", bitrate));
+        }
         
         // Add GPU acceleration if enabled
         if self.config.performance.ffmpeg_hardware_accel {
@@ -416,11 +455,20 @@ impl RustYtDlpDownloader {
         
         let ffmpeg_args_str = ffmpeg_args.join(" ");
         
+        // Determine audio quality based on config
+        let audio_quality = match self.config.preferred_quality {
+            crate::config::AudioQuality::Best => "best",
+            crate::config::AudioQuality::High => "high",
+            crate::config::AudioQuality::Medium => "medium", 
+            crate::config::AudioQuality::Low => "low",
+            crate::config::AudioQuality::Lossless => "lossless",
+        };
+        
         let mut cmd = std::process::Command::new("yt-dlp");
         cmd.args(&[
             "--extract-audio",
             "--audio-format", format,
-            "--audio-quality", "best",
+            "--audio-quality", audio_quality,
             "--output", &temp_file.to_string_lossy(),
             "--no-playlist",
             "--no-warnings",
@@ -450,6 +498,9 @@ impl RustYtDlpDownloader {
         
         // Find the downloaded file
         let downloaded_file = self.find_downloaded_file(&temp_dir).await?;
+        
+        // Validate the downloaded file (duration and size)
+        self.validate_downloaded_file(&downloaded_file).await?;
         
         // Move to final location with improved retry logic for file locking issues
         let mut retries = 10; // Increased retries
@@ -518,33 +569,25 @@ impl RustYtDlpDownloader {
     }
     
     async fn find_downloaded_file(&self, temp_dir: &std::path::Path) -> Result<std::path::PathBuf> {
-        // Look for audio files in temp directory
         let expected_ext = self.config.get_format_extension();
-        log::info!("🔍 [FIND] Looking for files with extension: {}", expected_ext);
-        
         let mut entries = tokio::fs::read_dir(temp_dir).await?;
         
+        // First try: look for expected format
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
             if let Some(ext) = path.extension() {
-                let ext_str = ext.to_str().unwrap_or("");
-                log::info!("🔍 [FIND] Found file: {:?} with extension: {}", path, ext_str);
-                if ext_str == expected_ext {
-                    log::info!("✅ [FIND] Found matching file: {:?}", path);
+                if ext.to_str().unwrap_or("") == expected_ext {
                     return Ok(path);
                 }
             }
         }
         
-        // Fallback: look for any audio file if the expected format wasn't found
-        log::info!("⚠️ [FIND] No {} files found, looking for any audio file...", expected_ext);
+        // Fallback: look for any audio file
         let mut entries = tokio::fs::read_dir(temp_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
             if let Some(ext) = path.extension() {
-                let ext_str = ext.to_str().unwrap_or("");
-                if matches!(ext_str, "mp3" | "m4a" | "flac" | "wav" | "ogg" | "webm" | "opus") {
-                    log::info!("✅ [FIND] Found fallback audio file: {:?} (extension: {})", path, ext_str);
+                if matches!(ext.to_str().unwrap_or(""), "mp3" | "m4a" | "flac" | "wav" | "ogg" | "opus" | "ape" | "webm") {
                     return Ok(path);
                 }
             }
@@ -601,12 +644,8 @@ impl RustYtDlpDownloader {
     }
     
     async fn embed_metadata(&self, file_path: &std::path::Path, metadata: &MetadataInfo, track_number: u32) -> Result<()> {
-        log::info!("📝 [EMBED] Embedding metadata into: {:?}", file_path);
-        log::info!("📝 [EMBED] Using track number: {}", track_number);
-        
         // Convert path to proper UTF-8 string for Python processing
         let file_path_str = file_path.to_string_lossy().to_string();
-        log::info!("📝 [EMBED] File path string: {}", file_path_str);
         
         // Verify file exists before trying to embed
         if !file_path.exists() {
@@ -680,6 +719,89 @@ impl RustYtDlpDownloader {
         
         Ok(())
     }
+
+    async fn embed_cover_art(&self, file_path: &std::path::Path, cover_art: &crate::metadata::CoverArtInfo) -> Result<()> {
+        log::info!("🖼️ [EMBED] Embedding cover art into: {:?}", file_path);
+        log::info!("🖼️ [EMBED] Cover art URL: {}", cover_art.url);
+        
+        // Convert path to proper UTF-8 string for Python processing
+        let file_path_str = file_path.to_string_lossy().to_string();
+        log::info!("🖼️ [EMBED] File path string: {}", file_path_str);
+        
+        // Verify file exists before trying to embed
+        if !file_path.exists() {
+            log::error!("❌ [EMBED] File does not exist: {:?}", file_path);
+            return Err(crate::errors::AppError::DownloadError(format!("File does not exist: {:?}", file_path)));
+        }
+        
+        // Use pre-downloaded cover art data if available, otherwise download it
+        let cover_art_data = if let Some(data) = &cover_art.data {
+            log::info!("🖼️ [EMBED] Using pre-downloaded cover art data: {} bytes", data.len());
+            crate::metadata::CoverArtData {
+                data: data.clone(),
+                mime_type: cover_art.mime_type.clone().unwrap_or_else(|| "image/jpeg".to_string()),
+            }
+        } else {
+            log::info!("🖼️ [EMBED] No pre-downloaded data, downloading from URL: {}", cover_art.url);
+            self.download_cover_art_data(&cover_art.url).await?
+        };
+        
+        // Call Python audio processor for cover art embedding
+        let request = serde_json::json!({
+            "action": "embed_cover_art",
+            "file_path": file_path_str,
+            "cover_art": {
+                "url": cover_art.url,
+                "data": cover_art_data.data,
+                "mime_type": cover_art_data.mime_type
+            }
+        });
+        
+        let result = self.call_python_processor(request).await?;
+        
+        if result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+            log::info!("✅ [EMBED] Cover art embedded successfully");
+        } else {
+            let error_msg = result.get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown error");
+            log::warn!("⚠️ [EMBED] Cover art embedding failed: {}", error_msg);
+            
+            // Don't fail the entire download if cover art fails
+            // Just log the error and continue
+        }
+        
+        Ok(())
+    }
+
+    async fn download_cover_art_data(&self, url: &str) -> Result<CoverArtData> {
+        log::info!("🖼️ [DOWNLOAD] Downloading cover art from: {}", url);
+        
+        let response = self.http_pool.get_client()
+            .get(url)
+            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .timeout(std::time::Duration::from_secs(30))
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            return Err(crate::errors::AppError::DownloadError(format!("Failed to download cover art: HTTP {}", response.status())));
+        }
+
+        let mime_type = response.headers()
+            .get("content-type")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("image/jpeg")
+            .to_string();
+        let data = response.bytes().await?;
+
+        log::info!("✅ [DOWNLOAD] Downloaded cover art: {} bytes, type: {}", data.len(), mime_type);
+        
+        Ok(CoverArtData {
+            data: data.to_vec(),
+            mime_type,
+        })
+    }
     
     async fn call_python_processor(&self, request: serde_json::Value) -> Result<serde_json::Value> {
         let mut cmd = std::process::Command::new("python");
@@ -694,8 +816,6 @@ impl RustYtDlpDownloader {
         // Send request to stdin
         if let Some(stdin) = child.stdin.take() {
             let request_str = serde_json::to_string(&request)?;
-            log::info!("🐍 [PYTHON] Sending request to Python processor: {}", request_str);
-            log::info!("🐍 [PYTHON] Request bytes (UTF-8): {:?}", request_str.as_bytes());
             tokio::task::spawn_blocking(move || {
                 use std::io::Write;
                 let mut stdin = stdin;
@@ -716,14 +836,433 @@ impl RustYtDlpDownloader {
         
         // Parse response
         let response_str = String::from_utf8_lossy(&output.stdout);
-        log::info!("🐍 [PYTHON] Python processor response: {}", response_str);
         let response: serde_json::Value = serde_json::from_str(&response_str)?;
         
         Ok(response)
     }
+
+    async fn validate_downloaded_file(&self, file_path: &std::path::Path) -> Result<()> {
+        // Check file size (albums are usually >60MB)
+        let metadata = tokio::fs::metadata(file_path).await?;
+        let file_size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
+        
+        if file_size_mb > 60.0 {
+            log::error!("❌ 5. File too large ({}MB) - likely an album, not a single track", file_size_mb);
+            return Err(crate::errors::AppError::DownloadError(
+                format!("File too large ({}MB) - likely an album, not a single track", file_size_mb)
+            ));
+        }
+        
+        // Check duration using FFmpeg
+        let ffmpeg_path = self.find_ffmpeg()?;
+        let mut cmd = std::process::Command::new(&ffmpeg_path);
+        cmd.args(&[
+            "-i", &file_path.to_string_lossy(),
+            "-f", "null",
+            "-"
+        ]);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        
+        let output = cmd.output()?;
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        
+        // Parse duration from FFmpeg output
+        if let Some(duration_line) = stderr.lines().find(|line| line.contains("Duration:")) {
+            if let Some(duration_str) = duration_line.split("Duration: ").nth(1) {
+                if let Some(duration_part) = duration_str.split(',').next() {
+                    // Parse duration in format HH:MM:SS.mmm
+                    let parts: Vec<&str> = duration_part.split(':').collect();
+                    if parts.len() == 3 {
+                        let hours: u32 = parts[0].parse().unwrap_or(0);
+                        let minutes: u32 = parts[1].parse().unwrap_or(0);
+                        let seconds: f64 = parts[2].parse().unwrap_or(0.0);
+                        
+                        let total_seconds = hours as f64 * 3600.0 + minutes as f64 * 60.0 + seconds;
+                        let total_minutes = total_seconds / 60.0;
+                        
+                        if total_minutes > 20.0 {
+                            log::error!("❌ 5. Track too long ({:.1} minutes) - likely an album or compilation", total_minutes);
+                            return Err(crate::errors::AppError::DownloadError(
+                                format!("Track too long ({:.1} minutes) - likely an album or compilation", total_minutes)
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+
+    async fn verify_metadata_embedding(&self, file_path: &std::path::Path, task: &DownloadTask) -> Result<()> {
+        // Read the embedded metadata from the file
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let request = serde_json::json!({
+            "action": "read_metadata",
+            "file_path": file_path_str
+        });
+        
+        let result = self.call_python_processor(request).await?;
+        
+        if let Some(metadata) = result.get("metadata") {
+            let embedded_title = metadata.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let embedded_artist = metadata.get("artist").and_then(|v| v.as_str()).unwrap_or("");
+            let embedded_track_number = metadata.get("track_number").and_then(|v| v.as_u64()).map(|n| n as u32);
+            
+            // Check if critical metadata is present
+            let mut issues = Vec::new();
+            
+            if embedded_title.is_empty() || embedded_title == "Unknown Title" {
+                issues.push("Missing or invalid title");
+            }
+            
+            if embedded_artist.is_empty() || embedded_artist == "Unknown Artist" {
+                issues.push("Missing or invalid artist");
+            }
+            
+            if embedded_track_number.is_none() {
+                issues.push("Missing track number");
+            }
+            
+            if !issues.is_empty() {
+                log::error!("❌ 6. Metadata verification failed: {}", issues.join(", "));
+                
+                // Try to fix missing track number
+                if embedded_track_number.is_none() {
+                    let embedded_album = metadata.get("album").and_then(|v| v.as_str()).unwrap_or("");
+                    let embedded_year = metadata.get("year").and_then(|v| v.as_u64()).map(|y| y as u32);
+                    let embedded_genre = metadata.get("genre").and_then(|v| v.as_str()).unwrap_or("");
+                    
+                    let fix_request = serde_json::json!({
+                        "action": "embed_metadata",
+                        "file_path": file_path_str,
+                        "metadata": {
+                            "title": embedded_title,
+                            "artist": embedded_artist,
+                            "album": embedded_album,
+                            "year": embedded_year,
+                            "genre": embedded_genre,
+                            "track_number": task.order,
+                            "disc_number": metadata.get("disc_number").and_then(|v| v.as_u64()).map(|n| n as u32),
+                            "album_artist": metadata.get("album_artist").and_then(|v| v.as_str()),
+                            "composer": metadata.get("composer").and_then(|v| v.as_str()),
+                            "isrc": metadata.get("isrc").and_then(|v| v.as_str()),
+                            "cover_art_url": metadata.get("cover_art_url").and_then(|v| v.as_str()),
+                            "lyrics": metadata.get("lyrics").and_then(|v| v.as_str())
+                        }
+                    });
+                    
+                    let _ = self.call_python_processor(fix_request).await;
+                }
+            }
+        } else {
+            log::error!("❌ 6. No metadata found in file - embedding may have failed");
+        }
+        
+        Ok(())
+    }
+
+    async fn validate_flac_metadata(&self, file_path: &std::path::Path) -> Result<()> {
+        log::info!("🔍 [FLAC-VALIDATE] Validating FLAC metadata for: {:?}", file_path);
+        
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let request = serde_json::json!({
+            "action": "validate_flac_metadata",
+            "file_path": file_path_str
+        });
+        
+        let result = self.call_python_processor(request).await?;
+        
+        if let Some(success) = result.get("success").and_then(|v| v.as_bool()) {
+            if success {
+                log::info!("✅ [FLAC-VALIDATE] FLAC metadata validation passed");
+                
+                // Log additional validation details
+                if let Some(cover_art_present) = result.get("cover_art_present").and_then(|v| v.as_bool()) {
+                    if cover_art_present {
+                        log::info!("🖼️ [FLAC-VALIDATE] Cover art present");
+                    } else {
+                        log::warn!("⚠️ [FLAC-VALIDATE] No cover art found");
+                    }
+                }
+                
+                if let Some(lyrics_present) = result.get("lyrics_present").and_then(|v| v.as_bool()) {
+                    if lyrics_present {
+                        log::info!("🎵 [FLAC-VALIDATE] Lyrics present");
+                    } else {
+                        log::info!("ℹ️ [FLAC-VALIDATE] No lyrics found");
+                    }
+                }
+                
+                if let Some(enhanced_present) = result.get("enhanced_metadata_present").and_then(|v| v.as_bool()) {
+                    if enhanced_present {
+                        log::info!("✨ [FLAC-VALIDATE] Enhanced metadata present");
+                    } else {
+                        log::info!("ℹ️ [FLAC-VALIDATE] Basic metadata only");
+                    }
+                }
+                
+                if let Some(vorbis_count) = result.get("vorbis_comments_count").and_then(|v| v.as_u64()) {
+                    log::info!("📊 [FLAC-VALIDATE] {} Vorbis comments embedded", vorbis_count);
+                }
+                
+                if let Some(file_size) = result.get("file_size_mb").and_then(|v| v.as_f64()) {
+                    log::info!("📁 [FLAC-VALIDATE] File size: {:.1} MB", file_size);
+                }
+            } else {
+                if let Some(missing_fields) = result.get("missing_required_fields").and_then(|v| v.as_array()) {
+                    let fields: Vec<String> = missing_fields.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    log::error!("❌ [FLAC-VALIDATE] Missing required fields: {}", fields.join(", "));
+                }
+                log::error!("❌ [FLAC-VALIDATE] FLAC metadata validation failed");
+            }
+        } else {
+            log::warn!("⚠️ [FLAC-VALIDATE] Could not determine validation result");
+        }
+        
+        Ok(())
+    }
+
+    async fn validate_wav_metadata(&self, file_path: &std::path::Path) -> Result<()> {
+        log::info!("🔍 [WAV-VALIDATE] Validating WAV metadata for: {:?}", file_path);
+        
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let request = serde_json::json!({
+            "action": "validate_wav_metadata",
+            "file_path": file_path_str
+        });
+        
+        let result = self.call_python_processor(request).await?;
+        
+        if let Some(success) = result.get("success").and_then(|v| v.as_bool()) {
+            if success {
+                log::info!("✅ [WAV-VALIDATE] WAV metadata validation passed");
+                
+                // Log additional validation details
+                if let Some(cover_art_present) = result.get("cover_art_present").and_then(|v| v.as_bool()) {
+                    if cover_art_present {
+                        log::info!("🖼️ [WAV-VALIDATE] Cover art present (APIC frame)");
+                    } else {
+                        log::info!("ℹ️ [WAV-VALIDATE] No embedded cover art (external cover art may be available)");
+                    }
+                }
+                
+                if let Some(lyrics_present) = result.get("lyrics_present").and_then(|v| v.as_bool()) {
+                    if lyrics_present {
+                        log::info!("🎵 [WAV-VALIDATE] Lyrics present (USLT frame)");
+                    } else {
+                        log::info!("ℹ️ [WAV-VALIDATE] No lyrics found");
+                    }
+                }
+                
+                if let Some(enhanced_present) = result.get("enhanced_metadata_present").and_then(|v| v.as_bool()) {
+                    if enhanced_present {
+                        log::info!("✨ [WAV-VALIDATE] Enhanced metadata present");
+                    } else {
+                        log::info!("ℹ️ [WAV-VALIDATE] Basic metadata only");
+                    }
+                }
+                
+                if let Some(id3_count) = result.get("total_id3_tags").and_then(|v| v.as_u64()) {
+                    log::info!("📊 [WAV-VALIDATE] {} ID3v2 tags embedded", id3_count);
+                }
+                
+                if let Some(file_size) = result.get("file_size_mb").and_then(|v| v.as_f64()) {
+                    log::info!("📁 [WAV-VALIDATE] File size: {:.1} MB", file_size);
+                }
+            } else {
+                if let Some(missing_fields) = result.get("missing_required_fields").and_then(|v| v.as_array()) {
+                    let fields: Vec<String> = missing_fields.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    log::error!("❌ [WAV-VALIDATE] Missing required fields: {}", fields.join(", "));
+                }
+                log::error!("❌ [WAV-VALIDATE] WAV metadata validation failed");
+            }
+        } else {
+            log::warn!("⚠️ [WAV-VALIDATE] Could not determine validation result");
+        }
+        
+        Ok(())
+    }
+
+    async fn validate_ogg_metadata(&self, file_path: &std::path::Path) -> Result<()> {
+        log::info!("🔍 [OGG-VALIDATE] Validating OGG metadata for: {:?}", file_path);
+        
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let request = serde_json::json!({
+            "action": "validate_ogg_metadata",
+            "file_path": file_path_str
+        });
+        
+        let result = self.call_python_processor(request).await?;
+        
+        if let Some(success) = result.get("success").and_then(|v| v.as_bool()) {
+            if success {
+                log::info!("✅ [OGG-VALIDATE] OGG metadata validation passed");
+                
+                // Log additional validation details
+                if let Some(cover_art_present) = result.get("cover_art_present").and_then(|v| v.as_bool()) {
+                    if cover_art_present {
+                        log::info!("🖼️ [OGG-VALIDATE] Cover art present (Vorbis comment)");
+                    } else {
+                        log::info!("ℹ️ [OGG-VALIDATE] No cover art found");
+                    }
+                }
+                
+                if let Some(lyrics_present) = result.get("lyrics_present").and_then(|v| v.as_bool()) {
+                    if lyrics_present {
+                        log::info!("🎵 [OGG-VALIDATE] Lyrics present (Vorbis comment)");
+                    } else {
+                        log::info!("ℹ️ [OGG-VALIDATE] No lyrics found");
+                    }
+                }
+                
+                if let Some(enhanced_present) = result.get("enhanced_metadata_present").and_then(|v| v.as_bool()) {
+                    if enhanced_present {
+                        log::info!("✨ [OGG-VALIDATE] Enhanced metadata present");
+                    } else {
+                        log::info!("ℹ️ [OGG-VALIDATE] Basic metadata only");
+                    }
+                }
+                
+                if let Some(comment_count) = result.get("total_vorbis_comments").and_then(|v| v.as_u64()) {
+                    log::info!("📊 [OGG-VALIDATE] {} Vorbis comments embedded", comment_count);
+                }
+                
+                if let Some(file_size) = result.get("file_size_mb").and_then(|v| v.as_f64()) {
+                    log::info!("📁 [OGG-VALIDATE] File size: {:.1} MB", file_size);
+                }
+            } else {
+                if let Some(missing_fields) = result.get("missing_required_fields").and_then(|v| v.as_array()) {
+                    let fields: Vec<String> = missing_fields.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    log::error!("❌ [OGG-VALIDATE] Missing required fields: {}", fields.join(", "));
+                }
+                log::error!("❌ [OGG-VALIDATE] OGG metadata validation failed");
+            }
+        } else {
+            log::warn!("⚠️ [OGG-VALIDATE] Could not determine validation result");
+        }
+        
+        Ok(())
+    }
+
+    async fn validate_opus_metadata(&self, file_path: &std::path::Path) -> Result<()> {
+        log::info!("🔍 [OPUS-VALIDATE] Validating Opus metadata for: {:?}", file_path);
+        
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let request = serde_json::json!({
+            "action": "validate_opus_metadata",
+            "file_path": file_path_str
+        });
+        
+        let result = self.call_python_processor(request).await?;
+        
+        if let Some(success) = result.get("success").and_then(|v| v.as_bool()) {
+            if success {
+                log::info!("✅ [OPUS-VALIDATE] Opus metadata validation passed");
+                
+                // Log additional validation details
+                if let Some(cover_art_present) = result.get("cover_art_present").and_then(|v| v.as_bool()) {
+                    if cover_art_present {
+                        log::info!("🖼️ [OPUS-VALIDATE] Cover art present (Vorbis comment)");
+                    } else {
+                        log::info!("ℹ️ [OPUS-VALIDATE] No cover art found");
+                    }
+                }
+                
+                if let Some(lyrics_present) = result.get("lyrics_present").and_then(|v| v.as_bool()) {
+                    if lyrics_present {
+                        log::info!("🎵 [OPUS-VALIDATE] Lyrics present (Vorbis comment)");
+                    } else {
+                        log::info!("ℹ️ [OPUS-VALIDATE] No lyrics found");
+                    }
+                }
+                
+                if let Some(comment_count) = result.get("total_vorbis_comments").and_then(|v| v.as_u64()) {
+                    log::info!("📊 [OPUS-VALIDATE] {} Vorbis comments embedded", comment_count);
+                }
+                
+                if let Some(file_size) = result.get("file_size_mb").and_then(|v| v.as_f64()) {
+                    log::info!("📁 [OPUS-VALIDATE] File size: {:.1} MB", file_size);
+                }
+            } else {
+                if let Some(missing_fields) = result.get("missing_required_fields").and_then(|v| v.as_array()) {
+                    let fields: Vec<String> = missing_fields.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    log::error!("❌ [OPUS-VALIDATE] Missing required fields: {}", fields.join(", "));
+                }
+                log::error!("❌ [OPUS-VALIDATE] Opus metadata validation failed");
+            }
+        } else {
+            log::warn!("⚠️ [OPUS-VALIDATE] Could not determine validation result");
+        }
+        
+        Ok(())
+    }
+
+    async fn validate_ape_metadata(&self, file_path: &std::path::Path) -> Result<()> {
+        log::info!("🔍 [APE-VALIDATE] Validating APE metadata for: {:?}", file_path);
+        
+        let file_path_str = file_path.to_string_lossy().to_string();
+        let request = serde_json::json!({
+            "action": "validate_ape_metadata",
+            "file_path": file_path_str
+        });
+        
+        let result = self.call_python_processor(request).await?;
+        
+        if let Some(success) = result.get("success").and_then(|v| v.as_bool()) {
+            if success {
+                log::info!("✅ [APE-VALIDATE] APE metadata validation passed");
+                
+                // Log additional validation details
+                if let Some(cover_art_present) = result.get("cover_art_present").and_then(|v| v.as_bool()) {
+                    if cover_art_present {
+                        log::info!("🖼️ [APE-VALIDATE] Cover art present (APEv2)");
+                    } else {
+                        log::info!("ℹ️ [APE-VALIDATE] No cover art found");
+                    }
+                }
+                
+                if let Some(lyrics_present) = result.get("lyrics_present").and_then(|v| v.as_bool()) {
+                    if lyrics_present {
+                        log::info!("🎵 [APE-VALIDATE] Lyrics present (APEv2)");
+                    } else {
+                        log::info!("ℹ️ [APE-VALIDATE] No lyrics found");
+                    }
+                }
+                
+                if let Some(tag_count) = result.get("total_ape_tags").and_then(|v| v.as_u64()) {
+                    log::info!("📊 [APE-VALIDATE] {} APEv2 tags embedded", tag_count);
+                }
+                
+                if let Some(file_size) = result.get("file_size_mb").and_then(|v| v.as_f64()) {
+                    log::info!("📁 [APE-VALIDATE] File size: {:.1} MB", file_size);
+                }
+            } else {
+                if let Some(missing_fields) = result.get("missing_required_fields").and_then(|v| v.as_array()) {
+                    let fields: Vec<String> = missing_fields.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect();
+                    log::error!("❌ [APE-VALIDATE] Missing required fields: {}", fields.join(", "));
+                }
+                log::error!("❌ [APE-VALIDATE] APE metadata validation failed");
+            }
+        } else {
+            log::warn!("⚠️ [APE-VALIDATE] Could not determine validation result");
+        }
+        
+        Ok(())
+    }
     
     async fn extract_basic_metadata(&self, file_path: &std::path::Path, task: &DownloadTask) -> Result<MetadataInfo> {
-        log::info!("📖 [BASIC-METADATA] Extracting basic metadata from: {:?}", file_path);
         
         // First, try to read existing metadata from the audio file
         let file_path_str = file_path.to_string_lossy().to_string();
@@ -735,7 +1274,6 @@ impl RustYtDlpDownloader {
         let result = self.call_python_processor(request).await?;
         
         if let Some(metadata) = result.get("metadata") {
-            log::info!("📖 [BASIC-METADATA] Found existing metadata in audio file");
             let mut basic_metadata = MetadataInfo {
                 title: metadata.get("title").and_then(|v| v.as_str()).unwrap_or(&task.track_info.title).to_string(),
                 artist: metadata.get("artist").and_then(|v| v.as_str()).unwrap_or(&task.track_info.artist).to_string(),
@@ -763,7 +1301,6 @@ impl RustYtDlpDownloader {
         }
         
         // Fallback: Create basic metadata from track info
-        log::info!("📖 [BASIC-METADATA] No existing metadata found, creating from track info");
         Ok(MetadataInfo {
             title: task.track_info.title.clone(),
             artist: task.track_info.artist.clone(),
@@ -784,94 +1321,145 @@ impl RustYtDlpDownloader {
 #[async_trait]
 impl Downloader for RustYtDlpDownloader {
     async fn download(&self, task: &DownloadTask) -> Result<()> {
-        let start_time = std::time::Instant::now();
-        log::info!("🎬 [RUST-YTDLP] Starting download: {} - {}", task.track_info.artist, task.track_info.title);
-        log::info!("📁 [RUST-YTDLP] Output path: {:?}", task.output_path);
-        log::info!("🆔 [RUST-YTDLP] Task ID: {}", task.id);
+        // Line 1: Searching for track
+        log::info!("🔍 1. Searching for track \"{}\" - \"{}\"", task.track_info.artist, task.track_info.title);
         
-        // Start parallel metadata and lyrics searching IMMEDIATELY
-        log::info!("🔍 [RUST-YTDLP] Starting parallel metadata and lyrics search...");
+        // Line 2: Searching for metadata and lyrics
+        log::info!("📊 2. Searching for metadata and lyrics");
+        
+        // Start parallel metadata, lyrics, and cover art searching
         let artist1 = task.track_info.artist.clone();
         let title1 = task.track_info.title.clone();
         let artist2 = task.track_info.artist.clone();
         let title2 = task.track_info.title.clone();
-        let task_id1 = task.id.clone();
-        let task_id2 = task.id.clone();
-        let output_path = task.output_path.clone();
-        
+        let artist3 = task.track_info.artist.clone();
+        let title3 = task.track_info.title.clone();
         let album1 = task.track_info.album.clone();
+        let album3 = task.track_info.album.clone();
+        
         let metadata_task = tokio::spawn(async move {
-            log::info!("🔍 [METADATA-TASK-{}] Starting metadata search for: {} - {}", task_id1, artist1, title1);
-            if let Some(ref album_name) = album1 {
-                log::info!("📀 [METADATA-TASK-{}] Album: {}", task_id1, album_name);
-            }
-            // Create a new instance for the spawned task
             let provider = crate::metadata::providers::MetadataProvider::new();
-            let result = provider.search_metadata_with_album(&artist1, &title1, album1.as_deref()).await;
-            log::info!("🔍 [METADATA-TASK-{}] Metadata search completed", task_id1);
-            result
+            provider.search_metadata_with_album(&artist1, &title1, album1.as_deref()).await
         });
         let lyrics_task = tokio::spawn(async move {
-            log::info!("🎵 [LYRICS-TASK-{}] Starting lyrics search for: {} - {}", task_id2, artist2, title2);
-            // Create a new instance for the spawned task
             let provider = crate::metadata::lyrics::LyricsProvider::new();
-            let result = provider.search_lyrics(&artist2, &title2).await;
-            log::info!("🎵 [LYRICS-TASK-{}] Lyrics search completed", task_id2);
-            result
+            provider.search_lyrics(&artist2, &title2).await
+        });
+        let cover_art_task = tokio::spawn(async move {
+            let provider = crate::metadata::providers::MetadataProvider::new();
+            provider.search_cover_art(&artist3, &title3, album3.as_deref()).await
         });
         
         let url = if !task.track_info.url.is_empty() {
-            log::info!("🔗 [RUST-YTDLP] Using provided URL: {}", task.track_info.url);
             task.track_info.url.clone()
         } else {
             // Search for the track if no URL provided
             let query = format!("{} {}", task.track_info.artist, task.track_info.title);
-            log::info!("🔍 [RUST-YTDLP] Searching for track: {}", query);
             let search_results = self.extractor.search(&query, 1).await?;
             
             if search_results.is_empty() {
-                log::error!("❌ [RUST-YTDLP] No search results found for: {}", query);
+                log::error!("❌ 1. No search results found for: {}", query);
                 return Err(crate::errors::AppError::DownloadError(
                     "No search results found".to_string()
                 ));
             }
             
-            log::info!("✅ [RUST-YTDLP] Found {} search results", search_results.len());
             search_results[0].webpage_url.clone()
         };
 
-        // Download directly with yt-dlp (like Python script)
-        log::info!("⬇️ [RUST-YTDLP] Starting yt-dlp download...");
+        // Line 3: Downloading track
+        log::info!("⬇️ 3. Downloading track");
         self.download_audio_file(&url, &task.output_path, &task.id).await?;
-        log::info!("✅ [RUST-YTDLP] Audio file download completed");
 
-        // Wait for metadata and lyrics search to complete
-        log::info!("⏳ [RUST-YTDLP] Waiting for metadata and lyrics search to complete...");
-        let (metadata_result, lyrics_result) = tokio::join!(metadata_task, lyrics_task);
+        // Wait for metadata, lyrics, and cover art search to complete
+        let (metadata_result, lyrics_result, cover_art_result) = tokio::join!(metadata_task, lyrics_task, cover_art_task);
         
         // Unwrap the spawned task results
         let metadata_result = metadata_result.map_err(|e| crate::errors::AppError::DownloadError(format!("Metadata task failed: {}", e)))?;
         let lyrics_result = lyrics_result.map_err(|e| crate::errors::AppError::DownloadError(format!("Lyrics task failed: {}", e)))?;
+        let cover_art_result = cover_art_result.map_err(|e| crate::errors::AppError::DownloadError(format!("Cover art task failed: {}", e)))?;
+        
+        // Line 4: Found metadata
+        let metadata_found = metadata_result.is_ok() && metadata_result.as_ref().unwrap().is_some();
+        let lyrics_found = lyrics_result.is_ok() && lyrics_result.as_ref().unwrap().is_some();
+        let cover_art_found = cover_art_result.is_ok() && cover_art_result.as_ref().unwrap().is_some();
+        let mut metadata_info = String::new();
+        if metadata_found {
+            metadata_info.push_str("metadata");
+        }
+        if lyrics_found {
+            if !metadata_info.is_empty() {
+                metadata_info.push_str(" + ");
+            }
+            metadata_info.push_str("lyrics");
+        }
+        if cover_art_found {
+            if !metadata_info.is_empty() {
+                metadata_info.push_str(" + ");
+            }
+            metadata_info.push_str("cover art");
+        }
+        if metadata_info.is_empty() {
+            metadata_info.push_str("none");
+        }
+        log::info!("✅ 4. Found metadata: {}", metadata_info);
+        
+        // Line 5: Downloaded track
+        log::info!("📁 5. Downloaded track");
+        
+        // Line 6: Embedding metadata
+        log::info!("📝 6. Embedding metadata");
         
         // Embed metadata and lyrics if found
-        if let Some(metadata) = metadata_result? {
-            log::info!("📝 [RUST-YTDLP] Embedding enhanced metadata...");
-            self.embed_metadata(&output_path, &metadata, task.order).await?;
+        if let Ok(Some(mut metadata)) = metadata_result {
+            // Use cover art from separate search if available
+            if let Ok(Some(ref cover_art)) = cover_art_result {
+                metadata.cover_art_url = Some(cover_art.url.clone());
+            }
+            self.embed_metadata(&task.output_path, &metadata, task.order).await?;
         } else {
             // Fallback: Try to extract basic metadata from the audio file itself
-            log::info!("📝 [RUST-YTDLP] No enhanced metadata found, trying to extract basic metadata from audio file...");
-            let basic_metadata = self.extract_basic_metadata(&output_path, &task).await?;
-            self.embed_metadata(&output_path, &basic_metadata, task.order).await?;
-        }
-        
-        if let Some(lyrics) = lyrics_result? {
-            log::info!("🎵 [RUST-YTDLP] Embedding lyrics...");
-            self.embed_lyrics(&output_path, &lyrics).await?;
+            let mut basic_metadata = self.extract_basic_metadata(&task.output_path, &task).await?;
+            // Use cover art from separate search if available
+            if let Ok(Some(ref cover_art)) = cover_art_result {
+                basic_metadata.cover_art_url = Some(cover_art.url.clone());
+            }
+            self.embed_metadata(&task.output_path, &basic_metadata, task.order).await?;
         }
 
-        let duration = start_time.elapsed();
-        log::info!("🎉 [RUST-YTDLP] Successfully completed download: {} - {} (took {:.2} seconds)", 
-                   task.track_info.artist, task.track_info.title, duration.as_secs_f64());
+        // Use cover art from the parallel search
+        let cover_art_to_embed = if let Ok(Some(cover_art)) = cover_art_result {
+            Some(cover_art)
+        } else {
+            None
+        };
+        
+        if let Ok(Some(lyrics)) = lyrics_result {
+            self.embed_lyrics(&task.output_path, &lyrics).await?;
+        }
+
+        // Embed cover art if found
+        if let Some(cover_art) = cover_art_to_embed {
+            self.embed_cover_art(&task.output_path, &cover_art).await?;
+        }
+
+        // Verify metadata was embedded correctly
+        self.verify_metadata_embedding(&task.output_path, &task).await?;
+        
+        // Additional format-specific validation
+        if let Some(ext) = task.output_path.extension().and_then(|s| s.to_str()) {
+            match ext {
+                "flac" => self.validate_flac_metadata(&task.output_path).await?,
+                "wav" => self.validate_wav_metadata(&task.output_path).await?,
+                "ogg" => self.validate_ogg_metadata(&task.output_path).await?,
+                "opus" => self.validate_opus_metadata(&task.output_path).await?,
+                "ape" => self.validate_ape_metadata(&task.output_path).await?,
+                _ => {} // No specific validation for other formats
+            }
+        }
+
+        // Line 7: Download completed
+        log::info!("🎉 7. Download completed for \"{}\" - \"{}\"", task.track_info.artist, task.track_info.title);
         Ok(())
     }
 

@@ -63,6 +63,16 @@ class AudioProcessor:
                 return self.embed_cover_art(request)
             elif action == "embed_lyrics":
                 return self.embed_lyrics(request)
+            elif action == "validate_flac_metadata":
+                return self.validate_flac_metadata(Path(request["file_path"]))
+            elif action == "validate_wav_metadata":
+                return self.validate_wav_metadata(Path(request["file_path"]))
+            elif action == "validate_ogg_metadata":
+                return self.validate_ogg_metadata(Path(request["file_path"]))
+            elif action == "validate_opus_metadata":
+                return self.validate_opus_metadata(Path(request["file_path"]))
+            elif action == "validate_ape_metadata":
+                return self.validate_ape_metadata(Path(request["file_path"]))
             elif action == "read_metadata":
                 return self.read_metadata(request)
             elif action == "get_info":
@@ -524,6 +534,7 @@ class AudioProcessor:
                 
                 audio = FLAC(str(file_path))
                 
+                # Basic metadata
                 if metadata.get("title"):
                     audio["TITLE"] = metadata["title"]
                 if metadata.get("artist"):
@@ -542,6 +553,175 @@ class AudioProcessor:
                     audio["COMPOSER"] = metadata["composer"]
                 if metadata.get("isrc"):
                     audio["ISRC"] = metadata["isrc"]
+                
+                # Enhanced FLAC-specific metadata
+                audio["ORGANIZATION"] = "Spotify Downloader"
+                audio["ENCODEDBY"] = "Spotify Downloader v1.0"
+                audio["ENCODING"] = "FLAC"
+                audio["SOURCEMEDIA"] = "Digital Media"
+                
+                # Add download timestamp
+                from datetime import datetime
+                audio["DOWNLOAD_DATE"] = datetime.now().isoformat()
+                audio["SOURCE"] = "YouTube"
+                
+                # Add ReplayGain fields (standard for FLAC)
+                audio["REPLAYGAIN_TRACK_GAIN"] = "0.0 dB"
+                audio["REPLAYGAIN_TRACK_PEAK"] = "1.0"
+                audio["REPLAYGAIN_ALBUM_GAIN"] = "0.0 dB"
+                audio["REPLAYGAIN_ALBUM_PEAK"] = "1.0"
+                
+                # Add comment
+                audio["COMMENT"] = "Downloaded with Spotify Downloader - High Quality Audio"
+                
+                audio.save()
+                
+            elif file_ext == ".wav":
+                # WAV files use ID3v2 tags (same as MP3)
+                from mutagen.id3 import ID3, TIT2, TPE1, TALB, TYER, TCON, TRCK, TPOS, TCOM, TSRC, TPE2, TENC, TSO2, TSOA, TXXX
+                from mutagen.wave import WAVE
+                
+                audio = WAVE(str(file_path))
+                if not audio.tags:
+                    audio.add_tags()
+                
+                # Basic metadata using ID3v2 tags
+                if metadata.get("title"):
+                    audio.tags.add(TIT2(encoding=3, text=metadata["title"]))
+                if metadata.get("artist"):
+                    audio.tags.add(TPE1(encoding=3, text=metadata["artist"]))
+                if metadata.get("album"):
+                    audio.tags.add(TALB(encoding=3, text=metadata["album"]))
+                if metadata.get("year"):
+                    audio.tags.add(TYER(encoding=3, text=str(metadata["year"])))
+                if metadata.get("genre"):
+                    audio.tags.add(TCON(encoding=3, text=metadata["genre"]))
+                if metadata.get("track_number"):
+                    audio.tags.add(TRCK(encoding=3, text=str(metadata["track_number"])))
+                if metadata.get("disc_number"):
+                    audio.tags.add(TPOS(encoding=3, text=str(metadata["disc_number"])))
+                if metadata.get("album_artist"):
+                    audio.tags.add(TPE2(encoding=3, text=metadata["album_artist"]))
+                if metadata.get("composer"):
+                    audio.tags.add(TCOM(encoding=3, text=metadata["composer"]))
+                if metadata.get("isrc"):
+                    audio.tags.add(TSRC(encoding=3, text=metadata["isrc"]))
+                
+                # Enhanced WAV-specific metadata
+                audio.tags.add(TENC(encoding=3, text="Spotify Downloader v1.0"))
+                audio.tags.add(TSO2(encoding=3, text="Spotify Downloader"))  # Organization
+                audio.tags.add(TSOA(encoding=3, text="Digital Media"))  # Source media
+                
+                # Add download timestamp
+                from datetime import datetime
+                audio.tags.add(TXXX(encoding=3, desc="DOWNLOAD_DATE", text=datetime.now().isoformat()))
+                audio.tags.add(TXXX(encoding=3, desc="SOURCE", text="YouTube"))
+                
+                # Add comment
+                audio.tags.add(TXXX(encoding=3, desc="COMMENT", text="Downloaded with Spotify Downloader - High Quality Audio"))
+                
+                audio.save()
+                
+            elif file_ext == ".ogg":
+                # OGG files can be either Vorbis (lossy) or FLAC (lossless)
+                from mutagen.oggvorbis import OggVorbis
+                from mutagen.oggflac import OggFLAC
+                
+                # Try to detect if it's OGG FLAC or OGG Vorbis
+                try:
+                    audio = OggFLAC(str(file_path))
+                    logger.info("Using OggFLAC for lossless OGG file")
+                except:
+                    audio = OggVorbis(str(file_path))
+                    logger.info("Using OggVorbis for lossy OGG file")
+                    
+            elif file_ext == ".opus":
+                # Opus files use Vorbis comments
+                from mutagen.opus import Opus
+                
+                audio = Opus(str(file_path))
+                logger.info("Using Opus for Opus file")
+                
+                # Basic metadata using Vorbis comments
+                if metadata.get("title"):
+                    audio["TITLE"] = metadata["title"]
+                if metadata.get("artist"):
+                    audio["ARTIST"] = metadata["artist"]
+                if metadata.get("album"):
+                    audio["ALBUM"] = metadata["album"]
+                if metadata.get("year"):
+                    audio["DATE"] = str(metadata["year"])
+                if metadata.get("genre"):
+                    audio["GENRE"] = metadata["genre"]
+                if metadata.get("track_number"):
+                    audio["TRACKNUMBER"] = str(metadata["track_number"])
+                if metadata.get("disc_number"):
+                    audio["DISCNUMBER"] = str(metadata["disc_number"])
+                if metadata.get("album_artist"):
+                    audio["ALBUMARTIST"] = metadata["album_artist"]
+                if metadata.get("composer"):
+                    audio["COMPOSER"] = metadata["composer"]
+                if metadata.get("isrc"):
+                    audio["ISRC"] = metadata["isrc"]
+                
+                # Enhanced Opus-specific metadata
+                audio["ORGANIZATION"] = "Spotify Downloader"
+                audio["ENCODEDBY"] = "Spotify Downloader v1.0"
+                audio["ENCODING"] = "Opus"
+                audio["SOURCEMEDIA"] = "Digital Media"
+                
+                # Add download timestamp
+                from datetime import datetime
+                audio["DOWNLOAD_DATE"] = datetime.now().isoformat()
+                audio["SOURCE"] = "YouTube"
+                
+                # Add comment
+                audio["COMMENT"] = "Downloaded with Spotify Downloader - High Quality Audio"
+                
+                audio.save()
+                
+            elif file_ext == ".ape":
+                # APE files use APEv2 tags
+                from mutagen.apev2 import APEv2
+                
+                audio = APEv2(str(file_path))
+                logger.info("Using APEv2 for APE file")
+                
+                # Basic metadata using APEv2 tags
+                if metadata.get("title"):
+                    audio["Title"] = metadata["title"]
+                if metadata.get("artist"):
+                    audio["Artist"] = metadata["artist"]
+                if metadata.get("album"):
+                    audio["Album"] = metadata["album"]
+                if metadata.get("year"):
+                    audio["Year"] = str(metadata["year"])
+                if metadata.get("genre"):
+                    audio["Genre"] = metadata["genre"]
+                if metadata.get("track_number"):
+                    audio["Track"] = str(metadata["track_number"])
+                if metadata.get("disc_number"):
+                    audio["Disc"] = str(metadata["disc_number"])
+                if metadata.get("album_artist"):
+                    audio["Album Artist"] = metadata["album_artist"]
+                if metadata.get("composer"):
+                    audio["Composer"] = metadata["composer"]
+                if metadata.get("isrc"):
+                    audio["ISRC"] = metadata["isrc"]
+                
+                # Enhanced APE-specific metadata
+                audio["Organization"] = "Spotify Downloader"
+                audio["EncodedBy"] = "Spotify Downloader v1.0"
+                audio["Codec"] = "APE"
+                audio["SourceMedia"] = "Digital Media"
+                
+                # Add download timestamp
+                from datetime import datetime
+                audio["DownloadDate"] = datetime.now().isoformat()
+                audio["Source"] = "YouTube"
+                
+                # Add comment
+                audio["Comment"] = "Downloaded with Spotify Downloader - High Quality Audio"
                 
                 audio.save()
             
@@ -1325,12 +1505,24 @@ class AudioProcessor:
             if not file_path.exists():
                 return {"error": "File does not exist"}
             
-            # Download cover art if URL is provided
-            if cover_art.get("url") and not cover_art.get("data"):
+            # Use pre-downloaded data if available, otherwise download from URL
+            if cover_art.get("data"):
+                logger.info(f"Using pre-downloaded cover art data: {len(cover_art['data'])} bytes")
+            elif cover_art.get("url"):
                 import requests
-                response = requests.get(cover_art["url"])
-                cover_art["data"] = response.content
-                cover_art["mime_type"] = response.headers.get("content-type", "image/jpeg")
+                try:
+                    logger.info(f"Downloading cover art from: {cover_art['url']}")
+                    response = requests.get(cover_art["url"], timeout=10)
+                    response.raise_for_status()  # Raise an exception for bad status codes
+                    cover_art["data"] = response.content
+                    cover_art["mime_type"] = response.headers.get("content-type", "image/jpeg")
+                    logger.info(f"Successfully downloaded cover art: {len(cover_art['data'])} bytes, type: {cover_art['mime_type']}")
+                except requests.exceptions.RequestException as e:
+                    logger.error(f"Failed to download cover art from {cover_art['url']}: {e}")
+                    return {"error": f"Failed to download cover art: {e}"}
+                except Exception as e:
+                    logger.error(f"Unexpected error downloading cover art: {e}")
+                    return {"error": f"Unexpected error downloading cover art: {e}"}
             
             if not cover_art.get("data"):
                 return {"error": "No cover art data available"}
@@ -1367,8 +1559,107 @@ class AudioProcessor:
                 picture.type = 3  # Cover (front)
                 picture.mime = cover_art.get("mime_type", "image/jpeg")
                 picture.data = cover_art["data"]
+                
+                # Add picture metadata for better compatibility
+                picture.width = 600
+                picture.height = 600
+                picture.depth = 24
+                picture.colors = 0  # Unknown
+                picture.description = "Front Cover"
+                
+                # Clear existing pictures to avoid duplicates
+                audio.clear_pictures()
                 audio.add_picture(picture)
                 audio.save()
+                
+            elif file_ext == ".wav":
+                # WAV files don't support embedded cover art
+                # Instead, we'll save the cover art as an external image file
+                from mutagen.id3 import APIC
+                from mutagen.wave import WAVE
+                
+                audio = WAVE(str(file_path))
+                if not audio.tags:
+                    audio.add_tags()
+                
+                # Try to embed as APIC (some players might support it)
+                try:
+                    audio.tags.add(APIC(
+                        encoding=3,
+                        mime=cover_art.get("mime_type", "image/jpeg"),
+                        type=3,  # Cover (front)
+                        desc="Cover",
+                        data=cover_art["data"]
+                    ))
+                    audio.save()
+                    logger.info("Cover art embedded in WAV file (APIC frame)")
+                except Exception as e:
+                    logger.warning(f"Could not embed cover art in WAV file: {e}")
+                    # Save as external image file
+                    self._save_external_cover_art(file_path, cover_art)
+                    
+            elif file_ext == ".ogg":
+                # OGG files support cover art via Vorbis comments (both Vorbis and FLAC)
+                from mutagen.oggvorbis import OggVorbis
+                from mutagen.oggflac import OggFLAC
+                
+                # Try to detect if it's OGG FLAC or OGG Vorbis
+                try:
+                    audio = OggFLAC(str(file_path))
+                    logger.info("Using OggFLAC for lossless OGG cover art")
+                except:
+                    audio = OggVorbis(str(file_path))
+                    logger.info("Using OggVorbis for lossy OGG cover art")
+                
+                # Embed cover art using Vorbis comment with base64 encoding
+                import base64
+                cover_data_b64 = base64.b64encode(cover_art["data"]).decode('utf-8')
+                mime_type = cover_art.get("mime_type", "image/jpeg")
+                
+                # Add cover art as Vorbis comment
+                audio["METADATA_BLOCK_PICTURE"] = [cover_data_b64]
+                audio["COVERART"] = [cover_data_b64]  # Alternative field
+                audio["COVERARTMIME"] = [mime_type]
+                
+                audio.save()
+                logger.info("Cover art embedded in OGG file (Vorbis comment)")
+                
+            elif file_ext == ".opus":
+                # Opus files support cover art via Vorbis comments
+                from mutagen.opus import Opus
+                
+                audio = Opus(str(file_path))
+                
+                # Embed cover art using Vorbis comment with base64 encoding
+                import base64
+                cover_data_b64 = base64.b64encode(cover_art["data"]).decode('utf-8')
+                mime_type = cover_art.get("mime_type", "image/jpeg")
+                
+                # Add cover art as Vorbis comment
+                audio["METADATA_BLOCK_PICTURE"] = [cover_data_b64]
+                audio["COVERART"] = [cover_data_b64]  # Alternative field
+                audio["COVERARTMIME"] = [mime_type]
+                
+                audio.save()
+                logger.info("Cover art embedded in Opus file (Vorbis comment)")
+                
+            elif file_ext == ".ape":
+                # APE files support cover art via APEv2 tags
+                from mutagen.apev2 import APEv2
+                
+                audio = APEv2(str(file_path))
+                
+                # Embed cover art using APEv2 with base64 encoding
+                import base64
+                cover_data_b64 = base64.b64encode(cover_art["data"]).decode('utf-8')
+                mime_type = cover_art.get("mime_type", "image/jpeg")
+                
+                # Add cover art as APEv2 tag
+                audio["Cover Art (Front)"] = [cover_data_b64]
+                audio["Cover Art MIME Type"] = [mime_type]
+                
+                audio.save()
+                logger.info("Cover art embedded in APE file (APEv2)")
                 
             return {"success": True}
             
@@ -1435,6 +1726,232 @@ class AudioProcessor:
         except Exception as e:
             logger.error(f"Error creating LRC file: {e}")
 
+    def _save_external_cover_art(self, audio_file_path: Path, cover_art: Dict[str, Any]) -> None:
+        """Save cover art as external image file for WAV files"""
+        try:
+            # Get the covers directory
+            covers_dir = audio_file_path.parent.parent / "covers"
+            covers_dir.mkdir(exist_ok=True)
+            
+            # Determine file extension from MIME type
+            mime_type = cover_art.get("mime_type", "image/jpeg")
+            if "png" in mime_type:
+                ext = ".png"
+            elif "gif" in mime_type:
+                ext = ".gif"
+            else:
+                ext = ".jpg"  # Default to JPEG
+            
+            # Create cover art filename based on audio file
+            cover_filename = audio_file_path.stem + ext
+            cover_path = covers_dir / cover_filename
+            
+            # Write cover art data to file
+            with open(cover_path, 'wb') as f:
+                f.write(cover_art["data"])
+            
+            logger.info(f"Saved external cover art: {cover_path}")
+            
+        except Exception as e:
+            logger.error(f"Error saving external cover art: {e}")
+
+    def validate_flac_metadata(self, file_path: Path) -> Dict[str, Any]:
+        """Validate FLAC metadata after embedding"""
+        try:
+            if not MUTAGEN_AVAILABLE:
+                return {"error": "mutagen not available - cannot validate metadata"}
+                
+            if not file_path.exists():
+                return {"error": "File does not exist"}
+            
+            file_ext = file_path.suffix.lower()
+            if file_ext != ".flac":
+                return {"error": "File is not a FLAC file"}
+            
+            audio = FLAC(str(file_path))
+            
+            # Check required fields
+            required_fields = ["TITLE", "ARTIST", "ALBUM", "TRACKNUMBER"]
+            missing_fields = []
+            
+            for field in required_fields:
+                if not audio.get(field):
+                    missing_fields.append(field)
+            
+            # Check cover art
+            cover_art_present = len(audio.pictures) > 0
+            
+            # Check lyrics
+            lyrics_present = bool(audio.get("LYRICS") or audio.get("UNSYNCEDLYRICS"))
+            
+            # Check enhanced metadata
+            enhanced_fields = ["ORGANIZATION", "ENCODEDBY", "ENCODING", "REPLAYGAIN_TRACK_GAIN"]
+            enhanced_present = all(audio.get(field) for field in enhanced_fields)
+            
+            validation_result = {
+                "success": len(missing_fields) == 0,
+                "missing_required_fields": missing_fields,
+                "cover_art_present": cover_art_present,
+                "lyrics_present": lyrics_present,
+                "enhanced_metadata_present": enhanced_present,
+                "total_pictures": len(audio.pictures),
+                "vorbis_comments_count": len(audio),
+                "file_size_mb": round(file_path.stat().st_size / (1024 * 1024), 2)
+            }
+            
+            if missing_fields:
+                logger.warning(f"Missing FLAC metadata fields: {missing_fields}")
+            
+            if not cover_art_present:
+                logger.warning("No cover art found in FLAC file")
+            
+            if not lyrics_present:
+                logger.info("No lyrics found in FLAC file")
+            
+            if not enhanced_present:
+                logger.info("Enhanced metadata not fully present")
+            
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Error validating FLAC metadata: {e}")
+            return {"error": str(e)}
+
+    def validate_wav_metadata(self, file_path: Path) -> Dict[str, Any]:
+        """Validate WAV metadata after embedding"""
+        try:
+            if not MUTAGEN_AVAILABLE:
+                return {"error": "mutagen not available - cannot validate metadata"}
+                
+            if not file_path.exists():
+                return {"error": "File does not exist"}
+            
+            file_ext = file_path.suffix.lower()
+            if file_ext != ".wav":
+                return {"error": "File is not a WAV file"}
+            
+            from mutagen.wave import WAVE
+            
+            audio = WAVE(str(file_path))
+            
+            # Check required fields
+            required_fields = ["TIT2", "TPE1", "TALB", "TRCK"]
+            missing_fields = []
+            
+            if audio.tags:
+                for field in required_fields:
+                    if not audio.tags.get(field):
+                        missing_fields.append(field)
+            else:
+                missing_fields = required_fields
+            
+            # Check cover art (WAV might have APIC frame)
+            cover_art_present = False
+            if audio.tags:
+                cover_art_present = bool(audio.tags.get("APIC"))
+            
+            # Check lyrics (WAV uses USLT frame)
+            lyrics_present = False
+            if audio.tags:
+                lyrics_present = bool(audio.tags.get("USLT"))
+            
+            # Check enhanced metadata
+            enhanced_fields = ["TENC", "TSO2", "TSOA"]
+            enhanced_present = False
+            if audio.tags:
+                enhanced_present = all(audio.tags.get(field) for field in enhanced_fields)
+            
+            validation_result = {
+                "success": len(missing_fields) == 0,
+                "missing_required_fields": missing_fields,
+                "cover_art_present": cover_art_present,
+                "lyrics_present": lyrics_present,
+                "enhanced_metadata_present": enhanced_present,
+                "total_id3_tags": len(audio.tags) if audio.tags else 0,
+                "file_size_mb": round(file_path.stat().st_size / (1024 * 1024), 2)
+            }
+            
+            if missing_fields:
+                logger.warning(f"Missing WAV metadata fields: {missing_fields}")
+            
+            if not cover_art_present:
+                logger.info("No cover art found in WAV file (external cover art may be available)")
+            
+            if not lyrics_present:
+                logger.info("No lyrics found in WAV file")
+            
+            if not enhanced_present:
+                logger.info("Enhanced metadata not fully present")
+            
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Error validating WAV metadata: {e}")
+            return {"error": str(e)}
+
+    def validate_ogg_metadata(self, file_path: Path) -> Dict[str, Any]:
+        """Validate OGG metadata after embedding"""
+        try:
+            if not MUTAGEN_AVAILABLE:
+                return {"error": "mutagen not available - cannot validate metadata"}
+                
+            if not file_path.exists():
+                return {"error": "File does not exist"}
+            
+            file_ext = file_path.suffix.lower()
+            if file_ext != ".ogg":
+                return {"error": "File is not an OGG file"}
+            
+            from mutagen.oggvorbis import OggVorbis
+            
+            audio = OggVorbis(str(file_path))
+            
+            # Check required fields
+            required_fields = ["TITLE", "ARTIST", "ALBUM", "TRACKNUMBER"]
+            missing_fields = []
+            
+            for field in required_fields:
+                if not audio.get(field):
+                    missing_fields.append(field)
+            
+            # Check cover art (OGG uses Vorbis comments)
+            cover_art_present = bool(audio.get("METADATA_BLOCK_PICTURE") or audio.get("COVERART"))
+            
+            # Check lyrics (OGG uses Vorbis comments)
+            lyrics_present = bool(audio.get("LYRICS") or audio.get("UNSYNCEDLYRICS"))
+            
+            # Check enhanced metadata
+            enhanced_fields = ["ORGANIZATION", "ENCODEDBY", "ENCODING", "SOURCEMEDIA"]
+            enhanced_present = all(audio.get(field) for field in enhanced_fields)
+            
+            validation_result = {
+                "success": len(missing_fields) == 0,
+                "missing_required_fields": missing_fields,
+                "cover_art_present": cover_art_present,
+                "lyrics_present": lyrics_present,
+                "enhanced_metadata_present": enhanced_present,
+                "total_vorbis_comments": len(audio),
+                "file_size_mb": round(file_path.stat().st_size / (1024 * 1024), 2)
+            }
+            
+            if missing_fields:
+                logger.warning(f"Missing OGG metadata fields: {missing_fields}")
+            
+            if not cover_art_present:
+                logger.info("No cover art found in OGG file")
+            
+            if not lyrics_present:
+                logger.info("No lyrics found in OGG file")
+            
+            if not enhanced_present:
+                logger.info("Enhanced metadata not fully present")
+            
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Error validating OGG metadata: {e}")
+            return {"error": str(e)}
+
     def embed_lyrics(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Embed lyrics using mutagen and create LRC file for FLAC/WAV"""
         try:
@@ -1498,8 +2015,103 @@ class AudioProcessor:
                     audio["\xa9lyr"] = formatted_lyrics
                     audio.save()
                 
-            elif file_ext in [".flac", ".wav"]:
-                # For FLAC and WAV, create LRC file instead of embedding
+            elif file_ext == ".flac":
+                # For FLAC, embed lyrics in Vorbis comments AND create LRC file
+                from mutagen.flac import FLAC
+                
+                audio = FLAC(str(file_path))
+                
+                # Embed lyrics in Vorbis comments (most compatible)
+                audio["LYRICS"] = formatted_lyrics
+                audio["UNSYNCEDLYRICS"] = formatted_lyrics
+                
+                # Add metadata about lyrics
+                audio["LYRICS_LANGUAGE"] = "eng"
+                audio["LYRICS_TYPE"] = "unsynced"
+                
+                audio.save()
+                
+                # Also create LRC file for compatibility with players that don't read Vorbis comments
+                self._create_lrc_file(file_path, formatted_lyrics)
+                
+            elif file_ext == ".wav":
+                # For WAV, embed lyrics using ID3v2 USLT frame AND create LRC file
+                from mutagen.id3 import ID3, USLT
+                from mutagen.wave import WAVE
+                
+                audio = WAVE(str(file_path))
+                if not audio.tags:
+                    audio.add_tags()
+                
+                # Embed lyrics using USLT frame (same as MP3)
+                audio.tags.add(USLT(encoding=3, lang="eng", desc="", text=formatted_lyrics))
+                audio.save()
+                
+                # Also create LRC file for compatibility
+                self._create_lrc_file(file_path, formatted_lyrics)
+                
+            elif file_ext == ".ogg":
+                # For OGG, embed lyrics in Vorbis comments AND create LRC file (both Vorbis and FLAC)
+                from mutagen.oggvorbis import OggVorbis
+                from mutagen.oggflac import OggFLAC
+                
+                # Try to detect if it's OGG FLAC or OGG Vorbis
+                try:
+                    audio = OggFLAC(str(file_path))
+                    logger.info("Using OggFLAC for lossless OGG lyrics")
+                except:
+                    audio = OggVorbis(str(file_path))
+                    logger.info("Using OggVorbis for lossy OGG lyrics")
+                
+                # Embed lyrics in Vorbis comments (most compatible)
+                audio["LYRICS"] = formatted_lyrics
+                audio["UNSYNCEDLYRICS"] = formatted_lyrics
+                
+                # Add metadata about lyrics
+                audio["LYRICS_LANGUAGE"] = "eng"
+                audio["LYRICS_TYPE"] = "unsynced"
+                
+                audio.save()
+                
+                # Also create LRC file for compatibility
+                self._create_lrc_file(file_path, formatted_lyrics)
+                
+            elif file_ext == ".opus":
+                # For Opus, embed lyrics in Vorbis comments AND create LRC file
+                from mutagen.opus import Opus
+                
+                audio = Opus(str(file_path))
+                
+                # Embed lyrics in Vorbis comments (most compatible)
+                audio["LYRICS"] = formatted_lyrics
+                audio["UNSYNCEDLYRICS"] = formatted_lyrics
+                
+                # Add metadata about lyrics
+                audio["LYRICS_LANGUAGE"] = "eng"
+                audio["LYRICS_TYPE"] = "unsynced"
+                
+                audio.save()
+                
+                # Also create LRC file for compatibility
+                self._create_lrc_file(file_path, formatted_lyrics)
+                
+            elif file_ext == ".ape":
+                # For APE, embed lyrics in APEv2 tags AND create LRC file
+                from mutagen.apev2 import APEv2
+                
+                audio = APEv2(str(file_path))
+                
+                # Embed lyrics in APEv2 tags
+                audio["Lyrics"] = formatted_lyrics
+                audio["Unsynchronised Lyrics"] = formatted_lyrics
+                
+                # Add metadata about lyrics
+                audio["Lyrics Language"] = "eng"
+                audio["Lyrics Type"] = "unsynced"
+                
+                audio.save()
+                
+                # Also create LRC file for compatibility
                 self._create_lrc_file(file_path, formatted_lyrics)
                 
             return {"success": True}
@@ -1571,6 +2183,84 @@ class AudioProcessor:
                     "disc_number": int(audio.get("DISCNUMBER", [0])[0]) if audio.get("DISCNUMBER") else None,
                     "album_artist": str(audio.get("ALBUMARTIST", [""])[0]) if audio.get("ALBUMARTIST") else "",
                     "composer": str(audio.get("COMPOSER", [""])[0]) if audio.get("COMPOSER") else "",
+                    "isrc": str(audio.get("ISRC", [""])[0]) if audio.get("ISRC") else "",
+                }
+                
+            elif file_ext == ".wav":
+                from mutagen.wave import WAVE
+                
+                audio = WAVE(str(file_path))
+                if audio.tags:
+                    metadata = {
+                        "title": str(audio.tags.get("TIT2", [""])[0]) if audio.tags.get("TIT2") else "",
+                        "artist": str(audio.tags.get("TPE1", [""])[0]) if audio.tags.get("TPE1") else "",
+                        "album": str(audio.tags.get("TALB", [""])[0]) if audio.tags.get("TALB") else "",
+                        "year": int(audio.tags.get("TYER", [0])[0]) if audio.tags.get("TYER") else None,
+                        "genre": str(audio.tags.get("TCON", [""])[0]) if audio.tags.get("TCON") else "",
+                        "track_number": int(audio.tags.get("TRCK", [0])[0]) if audio.tags.get("TRCK") else None,
+                        "disc_number": int(audio.tags.get("TPOS", [0])[0]) if audio.tags.get("TPOS") else None,
+                        "album_artist": str(audio.tags.get("TPE2", [""])[0]) if audio.tags.get("TPE2") else "",
+                        "composer": str(audio.tags.get("TCOM", [""])[0]) if audio.tags.get("TCOM") else "",
+                        "isrc": str(audio.tags.get("TSRC", [""])[0]) if audio.tags.get("TSRC") else "",
+                    }
+                else:
+                    metadata = {}
+                    
+            elif file_ext == ".ogg":
+                from mutagen.oggvorbis import OggVorbis
+                from mutagen.oggflac import OggFLAC
+                
+                # Try to detect if it's OGG FLAC or OGG Vorbis
+                try:
+                    audio = OggFLAC(str(file_path))
+                    logger.info("Using OggFLAC for lossless OGG metadata reading")
+                except:
+                    audio = OggVorbis(str(file_path))
+                    logger.info("Using OggVorbis for lossy OGG metadata reading")
+                metadata = {
+                    "title": str(audio.get("TITLE", [""])[0]) if audio.get("TITLE") else "",
+                    "artist": str(audio.get("ARTIST", [""])[0]) if audio.get("ARTIST") else "",
+                    "album": str(audio.get("ALBUM", [""])[0]) if audio.get("ALBUM") else "",
+                    "year": int(audio.get("DATE", [0])[0]) if audio.get("DATE") else None,
+                    "genre": str(audio.get("GENRE", [""])[0]) if audio.get("GENRE") else "",
+                    "track_number": int(audio.get("TRACKNUMBER", [0])[0]) if audio.get("TRACKNUMBER") else None,
+                    "disc_number": int(audio.get("DISCNUMBER", [0])[0]) if audio.get("DISCNUMBER") else None,
+                    "album_artist": str(audio.get("ALBUMARTIST", [""])[0]) if audio.get("ALBUMARTIST") else "",
+                    "composer": str(audio.get("COMPOSER", [""])[0]) if audio.get("COMPOSER") else "",
+                    "isrc": str(audio.get("ISRC", [""])[0]) if audio.get("ISRC") else "",
+                }
+                
+            elif file_ext == ".opus":
+                from mutagen.opus import Opus
+                
+                audio = Opus(str(file_path))
+                metadata = {
+                    "title": str(audio.get("TITLE", [""])[0]) if audio.get("TITLE") else "",
+                    "artist": str(audio.get("ARTIST", [""])[0]) if audio.get("ARTIST") else "",
+                    "album": str(audio.get("ALBUM", [""])[0]) if audio.get("ALBUM") else "",
+                    "year": int(audio.get("DATE", [0])[0]) if audio.get("DATE") else None,
+                    "genre": str(audio.get("GENRE", [""])[0]) if audio.get("GENRE") else "",
+                    "track_number": int(audio.get("TRACKNUMBER", [0])[0]) if audio.get("TRACKNUMBER") else None,
+                    "disc_number": int(audio.get("DISCNUMBER", [0])[0]) if audio.get("DISCNUMBER") else None,
+                    "album_artist": str(audio.get("ALBUMARTIST", [""])[0]) if audio.get("ALBUMARTIST") else "",
+                    "composer": str(audio.get("COMPOSER", [""])[0]) if audio.get("COMPOSER") else "",
+                    "isrc": str(audio.get("ISRC", [""])[0]) if audio.get("ISRC") else "",
+                }
+                
+            elif file_ext == ".ape":
+                from mutagen.apev2 import APEv2
+                
+                audio = APEv2(str(file_path))
+                metadata = {
+                    "title": str(audio.get("Title", [""])[0]) if audio.get("Title") else "",
+                    "artist": str(audio.get("Artist", [""])[0]) if audio.get("Artist") else "",
+                    "album": str(audio.get("Album", [""])[0]) if audio.get("Album") else "",
+                    "year": int(audio.get("Year", [0])[0]) if audio.get("Year") else None,
+                    "genre": str(audio.get("Genre", [""])[0]) if audio.get("Genre") else "",
+                    "track_number": int(audio.get("Track", [0])[0]) if audio.get("Track") else None,
+                    "disc_number": int(audio.get("Disc", [0])[0]) if audio.get("Disc") else None,
+                    "album_artist": str(audio.get("Album Artist", [""])[0]) if audio.get("Album Artist") else "",
+                    "composer": str(audio.get("Composer", [""])[0]) if audio.get("Composer") else "",
                     "isrc": str(audio.get("ISRC", [""])[0]) if audio.get("ISRC") else "",
                 }
             
@@ -1909,6 +2599,114 @@ class AudioProcessor:
             
         except Exception as e:
             logger.error(f"Error embedding cover art: {e}")
+
+    def validate_opus_metadata(self, file_path: Path) -> Dict[str, Any]:
+        """Validate Opus metadata after embedding"""
+        try:
+            from mutagen.opus import Opus
+            
+            audio = Opus(str(file_path))
+            
+            # Check required fields
+            required_fields = ["TITLE", "ARTIST", "ALBUM"]
+            missing_fields = []
+            
+            for field in required_fields:
+                if not audio.get(field):
+                    missing_fields.append(field)
+            
+            # Check for cover art
+            cover_art_present = bool(audio.get("METADATA_BLOCK_PICTURE") or audio.get("COVERART"))
+            
+            # Check for lyrics
+            lyrics_present = bool(audio.get("LYRICS") or audio.get("UNSYNCEDLYRICS"))
+            
+            # Count Vorbis comments
+            total_vorbis_comments = len(audio)
+            
+            # Get file size
+            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+            
+            validation_result = {
+                "success": len(missing_fields) == 0,
+                "missing_required_fields": missing_fields,
+                "cover_art_present": cover_art_present,
+                "lyrics_present": lyrics_present,
+                "total_vorbis_comments": total_vorbis_comments,
+                "file_size_mb": round(file_size_mb, 2),
+                "validation": {
+                    "valid": len(missing_fields) == 0,
+                    "format": "Opus",
+                    "metadata_fields": len(audio),
+                    "has_cover_art": cover_art_present,
+                    "has_lyrics": lyrics_present
+                }
+            }
+            
+            logger.info(f"Opus validation result: {validation_result}")
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Error validating Opus metadata: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "validation": {"valid": False, "format": "Opus"}
+            }
+
+    def validate_ape_metadata(self, file_path: Path) -> Dict[str, Any]:
+        """Validate APE metadata after embedding"""
+        try:
+            from mutagen.apev2 import APEv2
+            
+            audio = APEv2(str(file_path))
+            
+            # Check required fields
+            required_fields = ["Title", "Artist", "Album"]
+            missing_fields = []
+            
+            for field in required_fields:
+                if not audio.get(field):
+                    missing_fields.append(field)
+            
+            # Check for cover art
+            cover_art_present = bool(audio.get("Cover Art (Front)"))
+            
+            # Check for lyrics
+            lyrics_present = bool(audio.get("Lyrics") or audio.get("Unsynchronised Lyrics"))
+            
+            # Count APEv2 tags
+            total_ape_tags = len(audio)
+            
+            # Get file size
+            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+            
+            validation_result = {
+                "success": len(missing_fields) == 0,
+                "missing_required_fields": missing_fields,
+                "cover_art_present": cover_art_present,
+                "lyrics_present": lyrics_present,
+                "total_ape_tags": total_ape_tags,
+                "file_size_mb": round(file_size_mb, 2),
+                "validation": {
+                    "valid": len(missing_fields) == 0,
+                    "format": "APE",
+                    "metadata_fields": len(audio),
+                    "has_cover_art": cover_art_present,
+                    "has_lyrics": lyrics_present
+                }
+            }
+            
+            logger.info(f"APE validation result: {validation_result}")
+            return validation_result
+            
+        except Exception as e:
+            logger.error(f"Error validating APE metadata: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "validation": {"valid": False, "format": "APE"}
+            }
 
 def main():
     """Main entry point for the subprocess"""

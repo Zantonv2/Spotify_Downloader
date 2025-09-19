@@ -13,39 +13,30 @@ pub struct RustYtDlpDownloader {
 
 impl RustYtDlpDownloader {
     pub fn new(config: AppConfig) -> Result<Self> {
-        log::info!("🔧 [RUST-INIT] Starting Rust downloader initialization...");
-        
-        // Initialize HTTP pool without proxy first
-        log::info!("🌐 [RUST-INIT] Creating HTTP pool...");
+        // Initialize HTTP pool
         let http_pool = HttpPoolManager::new(10, 30)
             .map_err(|e| {
-                log::error!("❌ [RUST-INIT] HTTP pool creation failed: {}", e);
+                log::error!("❌ HTTP pool creation failed: {}", e);
                 e
             })?;
-        log::info!("✅ [RUST-INIT] HTTP pool created successfully");
         
         // Initialize cache
-        log::info!("💾 [RUST-INIT] Setting up cache directory...");
         let cache_dir = dirs::cache_dir()
             .unwrap_or_else(|| {
-                log::warn!("⚠️ [RUST-INIT] Could not get system cache dir, using ./cache");
+                log::warn!("⚠️ Could not get system cache dir, using ./cache");
                 PathBuf::from("./cache")
             })
             .join("spotify_downloader");
-        log::info!("📁 [RUST-INIT] Cache directory: {:?}", cache_dir);
         
         let cache = Arc::new(CacheManager::new(cache_dir, 1024, 3600)
             .map_err(|e| {
-                log::error!("❌ [RUST-INIT] Cache creation failed: {}", e);
+                log::error!("❌ Cache creation failed: {}", e);
                 e
             })?);
-        log::info!("✅ [RUST-INIT] Cache created successfully");
         
-        log::info!("🎬 [RUST-INIT] Creating yt-dlp downloader...");
         let downloader = YtDlpDownloader::new(http_pool.get_pool(), cache, config);
-        log::info!("✅ [RUST-INIT] yt-dlp downloader created successfully");
         
-        log::info!("🎉 [RUST-INIT] Rust downloader initialization completed!");
+        log::info!("✅ Rust downloader initialized");
         Ok(Self { downloader })
     }
 

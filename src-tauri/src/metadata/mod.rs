@@ -29,6 +29,12 @@ pub struct CoverArtInfo {
     pub mime_type: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct CoverArtData {
+    pub data: Vec<u8>,
+    pub mime_type: String,
+}
+
 #[async_trait::async_trait]
 pub trait MetadataEmbedder {
     async fn embed_metadata(&self, file_path: &PathBuf, metadata: &MetadataInfo) -> Result<()>;

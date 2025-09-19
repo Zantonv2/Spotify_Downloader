@@ -35,10 +35,7 @@ impl DownloadManager {
         // Add Python downloader (fallback) SECOND
         downloaders.push(Arc::new(PythonDownloader::new()));
         
-        log::info!("📊 Total downloaders available: {}", downloaders.len());
-        for (i, downloader) in downloaders.iter().enumerate() {
-            log::info!("  {}. {}", i + 1, downloader.get_name());
-        }
+        log::info!("📊 {} downloaders available", downloaders.len());
         
         let manager = Self {
             tasks: Arc::new(Mutex::new(HashMap::new())),
@@ -70,6 +67,23 @@ impl DownloadManager {
     }
 
     pub async fn add_download_with_order(&self, track_info: crate::api::TrackInfo, output_path: std::path::PathBuf, auto_start: bool, order: u32) -> Result<String> {
+        // Check if file already exists and is valid
+        if output_path.exists() {
+            if let Ok(file_metadata) = std::fs::metadata(&output_path) {
+                if file_metadata.len() > 1024 { // At least 1KB
+                    // Additional verification: check if it's a valid audio file
+                    if self.verify_audio_file(&output_path).await {
+                        log::info!("✅ [VERIFY] File already exists and is valid: {:?}", output_path);
+                        return Ok("already_downloaded".to_string());
+                    } else {
+                        log::warn!("⚠️ [VERIFY] File exists but appears corrupted, will re-download: {:?}", output_path);
+                        // Remove corrupted file
+                        let _ = std::fs::remove_file(&output_path);
+                    }
+                }
+            }
+        }
+
         let task_id = generate_download_id();
         let task = DownloadTask {
             id: task_id.clone(),
@@ -310,7 +324,7 @@ impl DownloadManager {
         let config = self.config.clone();
         
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(500)); // Check every 500ms
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100)); // Check every 100ms
             loop {
                 interval.tick().await;
                 
@@ -331,6 +345,7 @@ impl DownloadManager {
                 loop {
                     let active_count = *active_downloads.lock().await;
                     if active_count >= max_concurrent {
+                        log::debug!("🔄 [AUTO-QUEUE] Max concurrent reached ({}/{})", active_count, max_concurrent);
                         break; // No more capacity
                     }
 
@@ -343,6 +358,7 @@ impl DownloadManager {
                     drop(tasks_guard);
                     
                     if pending_tasks.is_empty() {
+                        log::debug!("🔄 [AUTO-QUEUE] No pending tasks found");
                         break; // No more pending tasks
                     }
 
@@ -534,6 +550,7 @@ impl DownloadManager {
         {
             let mut active_count = active_downloads.lock().await;
             *active_count = active_count.saturating_sub(1);
+            log::info!("📊 [QUEUE] Download completed. Active downloads: {}", *active_count);
         }
 
         // Log that a slot is now available for the next download
@@ -675,4 +692,116 @@ impl DownloadManager {
 
     // Automatic queue processor removed to prevent race conditions
     // Use process_queue() method for manual queue processing instead
+
+    async fn verify_audio_file(&self, file_path: &std::path::Path) -> bool {
+        // Check file extension
+        if let Some(ext) = file_path.extension().and_then(|s| s.to_str()) {
+            if !matches!(ext, "mp3" | "m4a" | "flac" | "wav" | "ogg" | "opus" | "ape") {
+                return false;
+            }
+        } else {
+            return false;
+        }
+
+        // Try to read the file with ffprobe to verify it's a valid audio file
+        let output = std::process::Command::new("ffprobe")
+            .arg("-v")
+            .arg("quiet")
+            .arg("-show_format")
+            .arg("-show_streams")
+            .arg(file_path)
+            .output();
+
+        match output {
+            Ok(result) => {
+                if result.status.success() {
+                    // Check if the output contains audio stream information
+                    let output_str = String::from_utf8_lossy(&result.stdout);
+                    output_str.contains("codec_type=audio")
+                } else {
+                    false
+                }
+            }
+            Err(_) => {
+                // If ffprobe is not available, fall back to basic file size check
+                if let Ok(metadata) = std::fs::metadata(file_path) {
+                    metadata.len() > 1024 // At least 1KB
+                } else {
+                    false
+                }
+            }
+        }
+    }
+
+    pub async fn verify_downloads(&self, output_directory: &std::path::Path) -> Result<DownloadVerification> {
+        log::info!("🔍 [VERIFICATION] Starting download verification...");
+        
+        let tasks = self.tasks.lock().await;
+        let mut total_tasks = 0;
+        let mut completed_tasks = 0;
+        let mut actual_files = 0;
+        let mut missing_files = Vec::new();
+        let mut oversized_files = Vec::new();
+        
+        // Count tasks and check their status
+        for (task_id, task) in tasks.iter() {
+            total_tasks += 1;
+            
+            if task.status == DownloadStatus::Completed {
+                completed_tasks += 1;
+                
+                // Check if file actually exists
+                if task.output_path.exists() {
+                    actual_files += 1;
+                    
+                    // Check file size
+                    if let Ok(metadata) = std::fs::metadata(&task.output_path) {
+                        let file_size_mb = metadata.len() as f64 / (1024.0 * 1024.0);
+                        if file_size_mb > 60.0 {
+                            oversized_files.push((task_id.clone(), file_size_mb));
+                        }
+                    }
+                } else {
+                    missing_files.push(task_id.clone());
+                }
+            }
+        }
+        
+        let verification = DownloadVerification {
+            total_tasks,
+            completed_tasks,
+            actual_files,
+            missing_files,
+            oversized_files,
+        };
+        
+        log::info!("📊 [VERIFICATION] Results:");
+        log::info!("   Total tasks: {}", verification.total_tasks);
+        log::info!("   Completed tasks: {}", verification.completed_tasks);
+        log::info!("   Actual files: {}", verification.actual_files);
+        log::info!("   Missing files: {}", verification.missing_files.len());
+        log::info!("   Oversized files: {}", verification.oversized_files.len());
+        
+        if !verification.missing_files.is_empty() {
+            log::warn!("⚠️ [VERIFICATION] Missing files: {:?}", verification.missing_files);
+        }
+        
+        if !verification.oversized_files.is_empty() {
+            log::warn!("⚠️ [VERIFICATION] Oversized files (likely albums):");
+            for (task_id, size) in &verification.oversized_files {
+                log::warn!("   {}: {:.1}MB", task_id, size);
+            }
+        }
+        
+        Ok(verification)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadVerification {
+    pub total_tasks: usize,
+    pub completed_tasks: usize,
+    pub actual_files: usize,
+    pub missing_files: Vec<String>,
+    pub oversized_files: Vec<(String, f64)>, // (task_id, size_mb)
 }

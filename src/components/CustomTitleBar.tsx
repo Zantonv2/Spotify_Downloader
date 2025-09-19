@@ -85,26 +85,21 @@ const CustomTitleBar: React.FC<CustomTitleBarProps> = ({ title = "Spotify Downlo
     >
       {/* Title */}
       <div className="flex items-center space-x-3" data-tauri-drag-region>
-        <div className="w-6 h-6 rounded-lg flex items-center justify-center shadow-lg overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500">
-          {/* Try multiple icon sources */}
+        <div className="w-6 h-6 rounded-lg flex items-center justify-center shadow-lg overflow-hidden">
+          {/* App Icon */}
           <img 
-            src="/assets/favicon-32x32-CRHPqZe-.png" 
+            src="/favicon-32x32.png" 
             alt="App Icon" 
             className="w-full h-full object-cover"
-            onLoad={() => console.log('✅ Custom icon loaded successfully!')}
+            onLoad={() => console.log('✅ App icon loaded successfully!')}
             onError={(e) => {
-              console.log('❌ Primary icon failed, trying fallback...');
+              console.log('❌ Icon failed to load, using fallback...');
               const target = e.target as HTMLImageElement;
-              // Try the original favicon as fallback
-              target.src = '/favicon-32x32.png';
-              target.onerror = () => {
-                console.log('❌ All icons failed, using gradient fallback');
-                target.style.display = 'none';
-                const parent = target.parentElement;
-                if (parent) {
-                  parent.innerHTML = '<div class="w-full h-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center"><span class="text-white text-xs font-bold">S</span></div>';
-                }
-              };
+              const parent = target.parentElement;
+              if (parent) {
+                parent.className = 'w-6 h-6 rounded-lg flex items-center justify-center shadow-lg overflow-hidden bg-gradient-to-br from-purple-500 to-pink-500';
+                parent.innerHTML = '<span class="text-white text-xs font-bold">S</span>';
+              }
             }}
           />
         </div>

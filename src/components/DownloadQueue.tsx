@@ -17,6 +17,8 @@ interface DownloadQueueProps {
   onDownloadAll?: () => void
   onDownloadSelected?: (taskIds: string[]) => void
   onClearList?: () => void
+  onRetryDownload?: (taskId: string) => void
+  onRetryAllFailed?: () => void
 }
 
 const DownloadQueue: React.FC<DownloadQueueProps> = ({
@@ -25,7 +27,9 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
   onRefresh,
   onDownloadAll,
   onDownloadSelected,
-  onClearList
+  onClearList,
+  onRetryDownload,
+  onRetryAllFailed,
 }) => {
   const [autoRefresh] = useState(true)
   const [activeFilter, setActiveFilter] = useState<'all' | 'downloading' | 'completed' | 'failed'>('all')
@@ -236,14 +240,25 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
             )}
           </div>
 
-          {/* Download All - Right side (main button) */}
-          <button
-            onClick={onDownloadAll}
-            className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold py-3 px-6 rounded-lg flex items-center space-x-2 transition-all duration-200 shadow-lg"
-          >
-            <DownloadCloud className="w-5 h-5" />
-            <span>Download All ({queue.length})</span>
-          </button>
+          {/* Action buttons - Right side */}
+          <div className="flex items-center space-x-2">
+            {progressStats.failed > 0 && onRetryAllFailed && (
+              <button
+                onClick={onRetryAllFailed}
+                className="bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold py-3 px-4 rounded-lg flex items-center space-x-2 transition-all duration-200 shadow-lg"
+              >
+                <Download className="w-4 h-4" />
+                <span>Retry All Failed ({progressStats.failed})</span>
+              </button>
+            )}
+            <button
+              onClick={onDownloadAll}
+              className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold py-3 px-6 rounded-lg flex items-center space-x-2 transition-all duration-200 shadow-lg"
+            >
+              <DownloadCloud className="w-5 h-5" />
+              <span>Download All ({queue.length})</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -370,6 +385,7 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
                   onRemove={onRemove}
                   isSelected={selectedTasks.has(task.id)}
                   onSelect={handleTaskSelect}
+                  onRetry={onRetryDownload}
                 />
               ))}
             </div>
@@ -393,6 +409,7 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
                   onRemove={onRemove}
                   isSelected={selectedTasks.has(task.id)}
                   onSelect={handleTaskSelect}
+                  onRetry={onRetryDownload}
                 />
               ))}
             </div>
@@ -416,6 +433,7 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
                   onRemove={onRemove}
                   isSelected={selectedTasks.has(task.id)}
                   onSelect={handleTaskSelect}
+                  onRetry={onRetryDownload}
                 />
               ))}
             </div>
@@ -448,6 +466,7 @@ const DownloadQueue: React.FC<DownloadQueueProps> = ({
                     key={task.id}
                     task={task}
                     onRemove={onRemove}
+                    onRetry={onRetryDownload}
                   />
                 ))}
               </div>

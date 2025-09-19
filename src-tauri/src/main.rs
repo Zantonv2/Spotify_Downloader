@@ -112,7 +112,8 @@ async fn main() {
             commands::clear_download_queue,
             commands::retry_download,
             commands::download_single,
-            commands::process_download_queue
+            commands::process_download_queue,
+            commands::verify_downloads
         ])
         .setup(|app| {
             info!("Application setup completed");

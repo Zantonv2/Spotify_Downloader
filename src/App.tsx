@@ -136,6 +136,29 @@ function App() {
     }
   }
 
+  const handleRetryDownload = async (taskId: string) => {
+    try {
+      await invoke('retry_download', { taskId })
+      success('Retry Started', 'Download retry initiated')
+      loadDownloadQueue()
+    } catch (error) {
+      console.error('Failed to retry download:', error)
+    }
+  }
+
+  const handleRetryAllFailed = async () => {
+    try {
+      const failedTasks = downloadQueue.filter(task => task.status === 'failed')
+      for (const task of failedTasks) {
+        await invoke('retry_download', { taskId: task.id })
+      }
+      success('Retry All Started', `Retrying ${failedTasks.length} failed downloads`)
+      loadDownloadQueue()
+    } catch (error) {
+      console.error('Failed to retry all failed downloads:', error)
+    }
+  }
+
 
 
   // Load download queue on app start
@@ -216,6 +239,8 @@ function App() {
             onDownloadAll={handleDownloadAll}
             onDownloadSelected={handleDownloadSelected}
             onClearList={handleClearList}
+            onRetryDownload={handleRetryDownload}
+            onRetryAllFailed={handleRetryAllFailed}
           />
         )}
       </main>

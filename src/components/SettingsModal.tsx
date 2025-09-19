@@ -348,7 +348,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                     />
                   </div>
 
-                  {/* Bitrate only for lossy formats */}
+                  {/* Quality settings for different formats */}
                   {config.preferred_format !== 'flac' && config.preferred_format !== 'wav' && (
                     <div>
                       <label className="block text-sm font-medium text-glass-300 mb-2">
@@ -359,11 +359,43 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                         onChange={(e) => handleInputChange('preferred_quality', e.target.value)}
                         className="glass-input text-white"
                       >
-                        <option value="low" className="text-slate-900">Low (128 kbps)</option>
-                        <option value="medium" className="text-slate-900">Medium (192 kbps)</option>
-                        <option value="high" className="text-slate-900">High (256 kbps)</option>
-                        <option value="best" className="text-slate-900">Best (320 kbps)</option>
+                        {config.preferred_format === 'ogg' ? (
+                          <>
+                            <option value="low" className="text-slate-900">Low (Quality 2 ~128kbps)</option>
+                            <option value="medium" className="text-slate-900">Medium (Quality 4 ~192kbps)</option>
+                            <option value="high" className="text-slate-900">High (Quality 6 ~256kbps)</option>
+                            <option value="best" className="text-slate-900">Best (Quality 8 ~320kbps)</option>
+                            <option value="lossless" className="text-slate-900">Lossless (FLAC in OGG)</option>
+                          </>
+                        ) : config.preferred_format === 'ape' ? (
+                          <>
+                            <option value="lossless" className="text-slate-900">Lossless (APE)</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="low" className="text-slate-900">Low (128 kbps)</option>
+                            <option value="medium" className="text-slate-900">Medium (192 kbps)</option>
+                            <option value="high" className="text-slate-900">High (256 kbps)</option>
+                            <option value="best" className="text-slate-900">Best (320 kbps)</option>
+                            <option value="lossless" className="text-slate-900">Lossless</option>
+                          </>
+                        )}
                       </select>
+                      {config.preferred_format === 'ogg' && (
+                        <p className="text-xs text-glass-400 mt-1">
+                          OGG Vorbis uses quality settings (0-10) for lossy, FLAC for lossless
+                        </p>
+                      )}
+                      {config.preferred_format === 'opus' && (
+                        <p className="text-xs text-glass-400 mt-1">
+                          Opus is a highly efficient lossy format, great for streaming
+                        </p>
+                      )}
+                      {config.preferred_format === 'ape' && (
+                        <p className="text-xs text-glass-400 mt-1">
+                          APE (Monkey's Audio) is a lossless format with high compression
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -376,10 +408,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ onClose }) => {
                       onChange={(e) => handleInputChange('preferred_format', e.target.value)}
                       className="glass-input text-white"
                     >
-                      <option value="mp3" className="text-slate-900">MP3</option>
-                      <option value="m4a" className="text-slate-900">M4A</option>
-                      <option value="flac" className="text-slate-900">FLAC</option>
-                      <option value="wav" className="text-slate-900">WAV</option>
+                        <option value="mp3" className="text-slate-900">MP3</option>
+                        <option value="m4a" className="text-slate-900">M4A</option>
+                        <option value="flac" className="text-slate-900">FLAC</option>
+                        <option value="wav" className="text-slate-900">WAV</option>
+                        <option value="ogg" className="text-slate-900">OGG</option>
+                        <option value="opus" className="text-slate-900">Opus</option>
+                        <option value="ape" className="text-slate-900">APE</option>
                     </select>
                   </div>
 
