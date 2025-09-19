@@ -1,109 +1,131 @@
 # Spotify Downloader
 
-A desktop app for downloading music with proper metadata and lyrics. Built with Tauri + React.
+A desktop app that lets you download music from Spotify with all the metadata, cover art, and lyrics intact. Built with Rust and React because I wanted something fast and reliable.
 
 ## What it does
 
-- Downloads music from YouTube, SoundCloud, and other sources
-- Automatically adds metadata (artist, album, year, genre) from Spotify and MusicBrainz
-- Embeds lyrics from multiple providers
-- Imports entire Spotify playlists or CSV files
-- Supports MP3, M4A, FLAC, and WAV formats
-- Clean, modern UI with real-time progress tracking
+Basically, you search for music on Spotify and download it to your computer. The app handles all the technical stuff - finding the best audio sources, converting formats, embedding metadata, and making sure everything looks good in your music player.
 
-## Why I built this
+## Features
 
-I wanted a simple way to download music with proper metadata and lyrics. Most downloaders either have terrible UIs or don't handle metadata well. This one does both.
+### The basics
+- Search and download from Spotify
+- Multiple audio formats (MP3, M4A, FLAC, WAV, OGG, Opus, APE)
+- Download entire playlists or albums
+- Queue system so you can download a bunch of stuff at once
 
-### Manual Setup
+### Metadata stuff
+- Gets all the track info (title, artist, album, year, etc.)
+- Downloads high-res cover art (tries Spotify first, then iTunes, then Cover Art Archive)
+- Finds and embeds lyrics
+- Makes sure everything is accurate after download
+
+### Performance
+- Downloads multiple tracks at the same time
+- Retries failed downloads automatically
+- Uses your GPU to speed up audio processing
+- Caches stuff to make it faster
+
+## Installation
 
 You'll need:
-- Rust
-- Node.js 
+- Rust (latest)
+- Node.js (18+)
+- Python (3.8+)
 - FFmpeg
-- Python
+- yt-dlp
 
+Then just:
 ```bash
-git clone https://github.com/ZantonV2/Spotify_Downloader.git
-cd Spotify_Downloader
-cargo build
-npm install
+git clone https://github.com/Zantonv2/spotify_downloader.git
+cd spotify_downloader
+cd src-tauri && cargo build
+cd ../python_processor && pip install -r requirements.txt
+cd .. && npm install
 npm run tauri dev
 ```
 
-See [SETUP.md](SETUP.md) for detailed instructions and troubleshooting.
+## Audio formats
 
-Add your API keys in Settings (Spotify, Musixmatch, etc.) - the app will work without them but with limited functionality.
+| Format | Quality | Lossless? | Notes |
+|--------|---------|-----------|-------|
+| MP3 | 128-320 kbps | No | Most compatible |
+| M4A | 128-320 kbps | No | Apple format |
+| FLAC | Lossless | Yes | Best quality |
+| WAV | Lossless | Yes | Uncompressed |
+| OGG | 128-320 kbps | Yes | Open source |
+| Opus | 128-320 kbps | No | Efficient |
+| APE | Lossless | Yes | High compression |
 
 ## How to use
 
-**Search & Download:**
-1. Go to Search tab
-2. Type song/artist name
-3. Click "Add to Queue"
+1. Search for music
+2. Click "Add to Queue" on tracks you want
+3. Go to Downloads tab and click "Download All"
+4. Wait for it to finish
 
-**Import playlists:**
-1. Go to Import tab  
-2. Paste Spotify playlist URL or upload CSV
-3. Tracks get added to download queue
-
-**Manage downloads:**
-1. Go to Downloads tab
-2. Watch progress, filter by status
-3. Ctrl+click to select multiple tracks
+You can also import entire playlists from Spotify if you have the playlist URL.
 
 ## Settings
 
-- **Download format**: MP3, M4A, FLAC, WAV
-- **Quality**: 128-320 kbps
-- **Concurrent downloads**: 1-10 parallel downloads
-- **Download folder**: Where to save files
-- **Metadata**: Auto-fetch from Spotify/MusicBrainz
-- **Lyrics**: Auto-fetch and embed
-- **Cover art**: Download album artwork
+There's a settings panel where you can:
+- Pick your preferred audio format and quality
+- Set how many downloads to run at once
+- Choose where to save files
+- Enable/disable GPU acceleration
+- Turn lyrics on/off
 
-## Development
+## Troubleshooting
 
-```bash
-npm run tauri dev    # Start dev server
-npm run tauri build  # Build for production
-```
+**Downloads not working?**
+- Make sure you have FFmpeg installed
+- Update yt-dlp: `pip install --upgrade yt-dlp`
+- Check your internet connection
+- Try reducing the concurrent download limit
 
-**Project structure:**
-- `src-tauri/src/` - Rust backend (commands, downloader, metadata, search)
-- `src/` - React frontend (components, hooks, types)
+**No cover art?**
+- Check your internet connection
+- The app tries multiple sources, so this is usually a network issue
+- Some tracks just don't have cover art available
 
-## Tech Stack
+**Slow downloads?**
+- Enable GPU acceleration in settings
+- Use an SSD if possible
+- Don't set the concurrent limit too high
 
-- **Frontend**: React + TypeScript + Tailwind
-- **Backend**: Rust + Tauri  
-- **Audio**: FFmpeg + Python (mutagen)
-- **Search**: yt-dlp (YouTube, SoundCloud, Bandcamp, Vimeo)
-- **Metadata**: Spotify, MusicBrainz, iTunes, Deezer
-- **Lyrics**: LRC Lib, Lyrics.ovh, Musixmatch, Genius
+**Audio quality issues?**
+- Make sure FFmpeg is properly installed
+- Try a different audio format
+- Check if GPU acceleration is working
 
-## Requirements
+## Technical details
 
-- Windows 10+, macOS 10.15+, or Linux
-- 4GB RAM (8GB recommended)
-- FFmpeg for audio processing
-- Python 3.8+ for metadata embedding
+The app is built with:
+- **Rust** for the backend (fast and reliable)
+- **React + TypeScript** for the UI
+- **Tauri** to put it all together
+- **yt-dlp** to find and download audio
+- **FFmpeg** to process the audio
+- **mutagen** (Python) to handle metadata
+
+## Why I built this
+
+I got tired of other downloaders that either didn't work well, had terrible metadata, or looked awful. So I built my own that does everything right - fast downloads, perfect metadata, beautiful cover art, and a clean interface.
+
+## Legal stuff
+
+This is for personal use only. Don't be a jerk and respect copyright laws. I'm not responsible if you use this for anything sketchy.
 
 ## Contributing
 
-1. Fork the repo
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+Feel free to submit issues or pull requests. The code is pretty straightforward - Rust backend, React frontend, Python for audio processing.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file.
-
-## Issues
-
-Found a bug? Have a feature request? [Open an issue](https://github.com/ZantonV2/Spotify_Downloader/issues).
+MIT License. Do whatever you want with it.
 
 ---
 
-**Note**: This is for personal use only. Please respect copyright laws and platform terms of service.
+If you find this useful, consider starring the repo. If you find bugs, open an issue. If you want to add features, submit a PR.
+
+Happy downloading! 🎵
